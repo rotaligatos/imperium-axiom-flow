@@ -26,7 +26,7 @@ const GROUPS = [
     ["mobile", "Mobile", "tel"], ["personal_email", "Personal email", "email"], ["present_address", "Present address", "text"], ["permanent_address", "Permanent address", "text"]]],
   ["Emergency contact", [["emergency_name", "Name", "text"], ["emergency_relation", "Relationship", "text"], ["emergency_mobile", "Mobile", "tel"]]],
   ["Employment", [["employment_type", "Employment type", "sel", [["", "—"], ["probationary", "Probationary"], ["regular", "Regular"], ["contractual", "Contractual"], ["project_based", "Project based"]]],
-    ["regularization_date", "Regularization date", "date"], ["shift_start", "Shift start", "time"], ["shift_end", "Shift end", "time"], ["daily_hours", "Daily hours (8, 9 or 10)", "num"], ["company_email", "Company email", "email"]]],
+    ["regularization_date", "Regularization date", "date"], ["company_email", "Company email", "email"]]],
   ["Leave eligibility", [["spouse_name", "Spouse name", "text"], ["marriage_cert_on_file", "Marriage certificate on file", "sel", YN], ["solo_parent", "Solo parent", "sel", YN],
     ["spic_no", "Solo Parent ID (SPIC) no.", "text"], ["spic_valid_until", "SPIC valid until", "date"], ["prior_paternity_count", "Paternity leaves already used (0–4)", "num"]]],
   ["Education", [["edu_attainment", "Highest attainment", "text"], ["edu_course", "Course", "text"]]],

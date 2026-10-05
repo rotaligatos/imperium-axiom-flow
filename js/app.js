@@ -2,6 +2,7 @@ import { buildAtrfPdf, fmtDate } from "./atrf.js";
 import { renderAdmin } from "./admin.js";
 import { renderEmployees } from "./employees.js";
 import { renderOrg } from "./org.js";
+import { renderSchedules, dayLine } from "./schedules.js";
 import { mountPad, pngToPdfImage } from "./sigpad.js";
 import { sign, registerDevice, myDevices, canSign } from "./sign.js";
 import { isConfigured, getSession, userId, signIn, signOut, rest, rpc } from "./api.js";
@@ -63,7 +64,7 @@ async function refreshBadge() {
 // ---------- shell ----------
 function shell(active, title, body, wide = false) {
   const nav = [["#/", "Home", "🏠", "home"], ["#/file", "File leave", "➕", "file"], ["#/requests", "My requests", "📄", "requests"],
-    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/org", "Org chart", "🗂️", "org"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
+    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/org", "Org chart", "🗂️", "org"], ["#/schedules", "Schedules", "🕒", "schedules"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
   const links = nav.map(([h, t, ic, k]) => `<a href="${h}" class="${active === k ? "on" : ""}" ${k === "approvals" ? 'data-approver-nav ' + (state.isApprover ? "" : "hidden") : ""}>
       <span class="ic" aria-hidden="true">${ic}</span><span>${t}</span>${k === "approvals" ? `<b class="badge" data-badge ${state.pending ? "" : "hidden"}>${state.pending}</b>` : ""}</a>`).join("");
   $app.innerHTML = `<div class="layout">
@@ -101,11 +102,12 @@ async function viewHome(tok) {
   shell("home", `Hello, ${(state.me.full_name || "").split(" ")[0]}`, loading());
   const el = document.querySelector(".content");
   try {
-    const [bal, reqs, devs, myImg] = await Promise.all([
+    const [bal, reqs, devs, myImg, mySch] = await Promise.all([
       rest(`vw_leave_balances_live?user_id=eq.${userId()}&year=eq.${YEAR}&select=leave_type_code,total_allotment,used,remaining`),
       rest(`leave_requests?requester_id=eq.${userId()}&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name)&order=created_at.desc&limit=5`),
       myDevices().catch(() => []),
-      rest(`iaf_signature_images?user_id=eq.${userId()}&select=png_base64`).catch(() => []) ]);
+      rest(`iaf_signature_images?user_id=eq.${userId()}&select=png_base64`).catch(() => []),
+      rpc("iaf_my_schedule", { p_days: 7 }).catch(() => null) ]);
     if (tok !== navToken) return;
     const cards = ["VL", "SL"].map((c) => {
       const b = bal.find((x) => x.leave_type_code === c);
@@ -115,7 +117,8 @@ async function viewHome(tok) {
       return `<div class="bal"><div class="bn">${name}</div><div class="bv">${num(b.remaining)}<small> days left</small></div>
         <div class="bar"><i style="width:${pct}%"></i></div><div class="bs">${num(b.used)} used of ${num(b.total_allotment)} in ${YEAR}</div></div>`; }).join("");
     const recent = reqs.length ? reqs.map((r) => reqRow(r)).join("") : `<div class="empty">No requests yet.</div>`;
-    el.innerHTML = `<div class="bals">${cards}</div>
+    const schedCard = mySch && mySch.linked && mySch.days.length ? `<div class="card mysched"><h3>My schedule</h3>${mySch.days.map((d, i) => `<div class="row${i === 0 ? " today" : ""}${d.rest ? " rest" : ""}"><span>${i === 0 ? "Today" : new Date(d.date + "T00:00:00").toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" })}</span><span>${esc(dayLine(d))}</span></div>`).join("")}${mySch.days[0].schedule ? `<p class="s">${esc(mySch.days[0].schedule)}</p>` : ""}</div>` : "";
+    el.innerHTML = `${schedCard}<div class="bals">${cards}</div>
       <a class="btn primary block" href="#/file">➕ File a leave</a>
       ${state.pending ? `<a class="notice" href="#/approvals"><b>${state.pending}</b> request${state.pending > 1 ? "s" : ""} waiting for your decision →</a>` : ""}
       <h2>Recent requests</h2><div class="list">${recent}</div>
@@ -291,7 +294,7 @@ function wireDetail(el, r) {
 
 let calMonth = null;
 async function viewCalendar(tok) {
-  shell("calendar", "Who's out", loading());
+  shell("calendar", "Who's out", loading(), true);
   const el = document.querySelector(".content");
   const now = new Date(); calMonth ||= new Date(now.getFullYear(), now.getMonth(), 1);
   try {
@@ -304,7 +307,7 @@ async function viewCalendar(tok) {
     for (let i = 1; i <= last.getDate(); i++) { const k = ymd(new Date(first.getFullYear(), first.getMonth(), i)); const n = byDay[k]?.length || 0;
       cells += `<button class="day ${n ? "has" : ""} ${k === todayStr() ? "today" : ""}" data-day="${k}">${i}${n ? `<i>${n}</i>` : ""}</button>`; }
     el.innerHTML = `<div class="between mhead"><button class="btn sm" data-m="-1" aria-label="Previous month">‹</button><h2>${first.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</h2><button class="btn sm" data-m="1" aria-label="Next month">›</button></div>
-      <div class="grid">${cells}</div><div id="dayinfo" class="list"></div>`;
+      <div class="calwrap"><div class="calmain"><div class="grid">${cells}</div></div><aside id="dayinfo" class="list calside"></aside></div>`;
     const show = (k) => { document.getElementById("dayinfo").innerHTML = (byDay[k] || []).length
       ? `<h3>${esc(fmtD(k))}</h3>` + byDay[k].map((r) => `<div class="row"><div class="av sm">${esc(initials(r.full_name))}</div><div class="grow"><div class="t">${esc(r.full_name)}</div><div class="s">${esc(r.leave_type_code)}${r.is_wfh ? " · WFH" : ""} · ${esc(fmtRange(r.start_date, r.end_date))}</div></div></div>`).join("")
       : `<h3>${esc(fmtD(k))}</h3><div class="empty small">Nobody is out.</div>`; };
@@ -327,6 +330,12 @@ async function viewEmployeesPage(tok) {
   const el = document.querySelector(".content"); if (tok !== navToken) return;
   await renderEmployees(el, { rpc, esc, toast, errBox, state });
 }
+async function viewSchedulesPage(tok) {
+  if (!state.canPeople) { location.replace("#/"); return; }
+  shell("schedules", "Work schedules", loading(), true);
+  const el = document.querySelector(".content"); if (tok !== navToken) return;
+  await renderSchedules(el, { rpc, esc, toast, errBox, state });
+}
 async function viewOrgPage(tok) {
   if (!state.canPeople) { location.replace("#/"); return; }
   shell("org", "Org chart", loading(), true);
@@ -344,6 +353,7 @@ async function route() {
   if (p === "admin") return viewAdminPage(tok);
   if (p === "employees") return viewEmployeesPage(tok);
   if (p === "org") return viewOrgPage(tok);
+  if (p === "schedules") return viewSchedulesPage(tok);
   return viewHome(tok);
 }
 document.addEventListener("click", async (ev) => { $toast.className = "";

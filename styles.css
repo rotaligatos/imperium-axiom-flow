@@ -150,3 +150,11 @@ label.tick{display:inline-flex!important;flex-direction:row;align-items:center;g
 /* the 201 file is a desktop job: hidden on phones and small tablets */
 .only-mobile{display:none}
 @media(max-width:859px){.only-desktop{display:none!important}.only-mobile{display:block}}
+.schedlist .sched{padding:6px 0;border-bottom:1px solid var(--line,#e5e7eb)}
+.dtab{border-collapse:collapse;margin:8px 0;font-size:.9rem}.dtab th,.dtab td{padding:3px 8px;text-align:left}.dtab input[type=number]{width:64px}
+.mysched .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line,#e5e7eb)}.mysched .today{font-weight:600}.mysched .rest{color:#6b7280}
+@media(min-width:860px){
+  .calwrap{display:grid;grid-template-columns:minmax(0,520px) minmax(260px,1fr);gap:20px;align-items:start}
+  .calwrap .day{aspect-ratio:auto;height:52px;min-height:0}
+  .calside{position:sticky;top:12px;max-height:calc(100vh - 100px);overflow:auto}
+}
