@@ -3,6 +3,7 @@ import { renderAdmin } from "./admin.js";
 import { renderEmployees } from "./employees.js";
 import { renderOrg } from "./org.js";
 import { renderSchedules, dayLine } from "./schedules.js";
+import { renderNotices, noticesHtml } from "./announcements.js";
 import { mountPad, pngToPdfImage } from "./sigpad.js";
 import { sign, registerDevice, myDevices, canSign } from "./sign.js";
 import { isConfigured, getSession, userId, signIn, signOut, rest, rpc } from "./api.js";
@@ -64,7 +65,7 @@ async function refreshBadge() {
 // ---------- shell ----------
 function shell(active, title, body, wide = false) {
   const nav = [["#/", "Home", "🏠", "home"], ["#/file", "File leave", "➕", "file"], ["#/requests", "My requests", "📄", "requests"],
-    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/org", "Org chart", "🗂️", "org"], ["#/schedules", "Schedules", "🕒", "schedules"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
+    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/org", "Org chart", "🗂️", "org"], ["#/schedules", "Schedules", "🕒", "schedules"], ["#/notices", "Notices", "📢", "notices"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
   const links = nav.map(([h, t, ic, k]) => `<a href="${h}" class="${active === k ? "on" : ""}" ${k === "approvals" ? 'data-approver-nav ' + (state.isApprover ? "" : "hidden") : ""}>
       <span class="ic" aria-hidden="true">${ic}</span><span>${t}</span>${k === "approvals" ? `<b class="badge" data-badge ${state.pending ? "" : "hidden"}>${state.pending}</b>` : ""}</a>`).join("");
   $app.innerHTML = `<div class="layout">
@@ -102,12 +103,11 @@ async function viewHome(tok) {
   shell("home", `Hello, ${(state.me.full_name || "").split(" ")[0]}`, loading());
   const el = document.querySelector(".content");
   try {
-    const [bal, reqs, devs, myImg, mySch] = await Promise.all([
+    const [bal, reqs, devs, myImg] = await Promise.all([
       rest(`vw_leave_balances_live?user_id=eq.${userId()}&year=eq.${YEAR}&select=leave_type_code,total_allotment,used,remaining`),
       rest(`leave_requests?requester_id=eq.${userId()}&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name)&order=created_at.desc&limit=5`),
       myDevices().catch(() => []),
-      rest(`iaf_signature_images?user_id=eq.${userId()}&select=png_base64`).catch(() => []),
-      rpc("iaf_my_schedule", { p_days: 7 }).catch(() => null) ]);
+      rest(`iaf_signature_images?user_id=eq.${userId()}&select=png_base64`).catch(() => []) ]);
     if (tok !== navToken) return;
     const cards = ["VL", "SL"].map((c) => {
       const b = bal.find((x) => x.leave_type_code === c);
@@ -117,8 +117,7 @@ async function viewHome(tok) {
       return `<div class="bal"><div class="bn">${name}</div><div class="bv">${num(b.remaining)}<small> days left</small></div>
         <div class="bar"><i style="width:${pct}%"></i></div><div class="bs">${num(b.used)} used of ${num(b.total_allotment)} in ${YEAR}</div></div>`; }).join("");
     const recent = reqs.length ? reqs.map((r) => reqRow(r)).join("") : `<div class="empty">No requests yet.</div>`;
-    const schedCard = mySch && mySch.linked && mySch.days.length ? `<div class="card mysched"><h3>My schedule</h3>${mySch.days.map((d, i) => `<div class="row${i === 0 ? " today" : ""}${d.rest ? " rest" : ""}"><span>${i === 0 ? "Today" : new Date(d.date + "T00:00:00").toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" })}</span><span>${esc(dayLine(d))}</span></div>`).join("")}${mySch.days[0].schedule ? `<p class="s">${esc(mySch.days[0].schedule)}</p>` : ""}</div>` : "";
-    el.innerHTML = `${schedCard}<div class="bals">${cards}</div>
+    el.innerHTML = `<div id="homeextra"></div><div class="bals">${cards}</div>
       <a class="btn primary block" href="#/file">➕ File a leave</a>
       ${state.pending ? `<a class="notice" href="#/approvals"><b>${state.pending}</b> request${state.pending > 1 ? "s" : ""} waiting for your decision →</a>` : ""}
       <h2>Recent requests</h2><div class="list">${recent}</div>
@@ -132,9 +131,17 @@ async function viewHome(tok) {
         <div id="padhost"></div>
         <button class="btn block" data-act="draw-sig">${myImg[0] ? "Change signature" : "Draw my signature"}</button></div>`;
     el.querySelectorAll("[data-act=reg-device]").forEach((rb) => (rb.onclick = async (ev) => { const b = ev.currentTarget; b.disabled = true;
-      try { await registerDevice(state.me?.full_name); toast("This device is set up ✔"); route(); } catch (e) { toast(e.message || "Could not set up this device", true); b.disabled = false; } }));
+      try { await registerDevice(state.me?.full_name); toast("This device is set up ✔"); route(); 
+  } catch (e) { toast(e.message || "Could not set up this device", true); b.disabled = false; } }));
     el.querySelector("[data-act=draw-sig]").onclick = (ev) => { ev.currentTarget.hidden = true;
       mountPad(el.querySelector("#padhost"), { onCancel: () => route(), onSave: async (png) => { await rpc("iaf_signature_image_save", { p_png_base64: png }); toast("Signature saved ✔"); route(); } }); };
+    // Extras never block the Home screen: a slow or failing call just leaves that card out.
+    const soft = (pr, ms = 8000) => Promise.race([pr, new Promise((r) => setTimeout(() => r(null), ms))]).catch(() => null);
+    Promise.all([soft(rpc("iaf_my_schedule", { p_days: 7 })), soft(rpc("iaf_my_announcements"))]).then(([mySch, myNotices]) => {
+      const box = document.getElementById("homeextra"); if (!box || tok !== navToken) return;
+      const schedCard = mySch && mySch.linked && mySch.days.length ? `<div class="card mysched"><h3>My schedule</h3>${mySch.days.map((d, i) => `<div class="row${i === 0 ? " today" : ""}${d.rest ? " rest" : ""}"><span>${i === 0 ? "Today" : new Date(d.date + "T00:00:00").toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" })}</span><span>${esc(dayLine(d))}</span></div>`).join("")}${mySch.days[0].schedule ? `<p class="s">${esc(mySch.days[0].schedule)}</p>` : ""}</div>` : "";
+      box.innerHTML = noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard;
+    });
   } catch (e) { el.innerHTML = errBox(e); }
 }
 
@@ -336,6 +343,12 @@ async function viewSchedulesPage(tok) {
   const el = document.querySelector(".content"); if (tok !== navToken) return;
   await renderSchedules(el, { rpc, esc, toast, errBox, state });
 }
+async function viewNoticesPage(tok) {
+  if (!state.canPeople) { location.replace("#/"); return; }
+  shell("notices", "Announcements", loading(), true);
+  const el = document.querySelector(".content"); if (tok !== navToken) return;
+  await renderNotices(el, { rpc, esc, toast, errBox, state });
+}
 async function viewOrgPage(tok) {
   if (!state.canPeople) { location.replace("#/"); return; }
   shell("org", "Org chart", loading(), true);
@@ -354,9 +367,12 @@ async function route() {
   if (p === "employees") return viewEmployeesPage(tok);
   if (p === "org") return viewOrgPage(tok);
   if (p === "schedules") return viewSchedulesPage(tok);
+  if (p === "notices") return viewNoticesPage(tok);
   return viewHome(tok);
 }
 document.addEventListener("click", async (ev) => { $toast.className = "";
+  const ack = ev.target.closest("[data-ack]");
+  if (ack) { ack.disabled = true; try { await rpc("iaf_announcement_ack", { p_id: ack.dataset.ack }); toast("Thank you ✔"); route(); } catch (e) { toast(e.message, true); ack.disabled = false; } return; }
   if (ev.target.closest("[data-act=signout]")) { await signOut(); state.me = null; state.isApprover = false; state.isAdmin = false; state.canPeople = false; state.empCompany = null; state.pending = 0; location.hash = "#/"; route(); }
 });
 window.addEventListener("hashchange", route);
