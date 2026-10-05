@@ -57,10 +57,11 @@ async function refresh() {
 export async function rest(path, { method = "GET", body, headers = {} } = {}, retried = false) {
   if (!session) throw Object.assign(new Error("Please sign in."), { status: 401 });
   if (session.expires_at - Date.now() / 1000 < 60) await refresh();
-  const res = await fetch(`${cfg.SUPABASE_URL}/rest/v1/${path}`, {
+  const ac = new AbortController(), timer = setTimeout(() => ac.abort(), 25000);   // a stuck request becomes an error instead of an endless spinner
+  const res = await fetch(`${cfg.SUPABASE_URL}/rest/v1/${path}`, { signal: ac.signal,
     method, headers: { apikey: cfg.SUPABASE_ANON_KEY, Authorization: `Bearer ${session.access_token}`,
       "Content-Type": "application/json", Accept: "application/json", ...headers },
-    body: body === undefined ? undefined : JSON.stringify(body) });
+    body: body === undefined ? undefined : JSON.stringify(body) }).catch((e) => { throw e.name === "AbortError" ? new Error("The server took too long to answer. Please try again.") : e; }).finally(() => clearTimeout(timer));
   if (res.status === 401 && !retried) { await refresh(); return rest(path, { method, body, headers }, true); }
   return parse(res);
 }

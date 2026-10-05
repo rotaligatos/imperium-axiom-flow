@@ -77,7 +77,7 @@ function shell(active, title, body, wide = false) {
       <div class="content${wide ? " wide" : ""}">${body}</div></main>
     <nav class="tabs">${links}</nav></div>`;
 }
-const loading = (t = "Loading…") => `<div class="empty">${esc(t)}</div>`;
+const loading = (t = "Loading…") => `<div class="empty loading">${esc(t)}</div>`;
 const errBox = (e) => `<div class="alert bad">${esc(e.message || e)}</div>`;
 
 // ---------- views ----------
@@ -382,7 +382,22 @@ async function bootSignedIn() {
     $app.innerHTML = `<div class="auth"><div class="card"><h1>Can't open your account</h1>${errBox(e)}<button class="btn block" data-act="signout">Sign out</button></div></div>`; return; }
   await refreshBadge(); route();
 }
+// If the screen is still "loading" after 15 seconds, offer a one-tap reset of this device's saved copy and sign-in.
+function watchdog() {
+  let since = 0;
+  setInterval(() => {
+    const stuck = document.querySelector("#login button[type=submit][disabled]") || (!document.querySelector("#login") && (document.querySelector(".content .loading") || !document.querySelector(".layout")));
+    if (!stuck) { since = 0; document.getElementById("resetbar")?.remove(); return; }
+    since ||= Date.now(); if (Date.now() - since < 15000 || document.getElementById("resetbar")) return;
+    const bar = document.createElement("div"); bar.id = "resetbar";
+    bar.style.cssText = "position:fixed;left:0;right:0;bottom:0;background:#fff3cd;border-top:2px solid #e0a800;padding:12px 16px;z-index:99;font:14px system-ui";
+    bar.innerHTML = 'Taking too long? <button id="resetbtn" style="margin-left:8px;padding:6px 12px">Reset this device and reload</button>';
+    document.body.appendChild(bar);
+    document.getElementById("resetbtn").onclick = async () => { try { localStorage.clear(); sessionStorage.clear(); (await navigator.serviceWorker.getRegistrations()).forEach((r) => r.unregister()); (await caches.keys()).forEach((k) => caches.delete(k)); } catch {} location.reload(); };
+  }, 3000);
+}
 async function start() {
+  watchdog();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
   if (getSession()) await bootSignedIn(); else viewLogin();
   const tick = () => getSession() && state.me && refreshBadge();
