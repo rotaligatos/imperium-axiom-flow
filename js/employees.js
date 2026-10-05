@@ -14,13 +14,15 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
   try { companies = await rpc("iaf_my_companies"); } catch (e) { el.innerHTML = errBox(e); return; }
   if (!companies.length) { el.innerHTML = `<div class="empty">No company available.</div>`; return; }
   const cur = companies.find((c) => c.id === state.empCompany) || companies[0]; state.empCompany = cur.id;
-  let dir, lk, extras;
-  try { [dir, lk, extras] = await Promise.all([rpc("iaf_employee_directory", { p_company: cur.id }), rpc("iaf_org_lookups", { p_company: cur.id }), rpc("iaf_employee_extras", { p_company: cur.id })]); } catch (e) { el.innerHTML = errBox(e); return; }
+  let dir, lk, extras, depts;
+  try { [dir, lk, extras, depts] = await Promise.all([rpc("iaf_employee_directory", { p_company: cur.id }), rpc("iaf_org_lookups", { p_company: cur.id }), rpc("iaf_employee_extras", { p_company: cur.id }), rpc("iaf_dept_list", { p_company: cur.id })]); } catch (e) { el.innerHTML = errBox(e); return; }
   const xcache = {};   // lookups of other companies, loaded only when someone opens "add another position"
   const extrasOf = (id) => extras.filter((x) => x.employee_id === id);
   const visitors = extras.filter((x) => x.company_id === cur.id && x.home_company_id !== cur.id);
   const canLevels = state.isAdmin;
   const opt = (rows, val, label, sel, none) => `${none ? `<option value="">${esc(none)}</option>` : ""}${rows.map((r) => `<option value="${esc(r[val])}"${r[val] === sel ? " selected" : ""}>${esc(label(r))}</option>`).join("")}`;
+  const deptName = (list) => { const m = Object.fromEntries(list.map((d) => [d.id, d.name])); return (d) => (d.parent_id && m[d.parent_id] ? `${m[d.parent_id]} › ${d.name}` : d.name); };
+  const deptLabel = deptName(lk.departments);
   const roleLabel = (r) => `${r.title} · ${RANKS[r.rank] || ""}`;
   const rankOf = Object.fromEntries(lk.roles.map((r) => [r.id, r.rank]));
   const q = (state.empQuery || "").toLowerCase();
@@ -32,6 +34,7 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
       <div class="between"><div class="pmain"><b>${esc(p.full_name)}</b>${p.has_login ? ` <span class="chip ok">login</span>` : ""}${p.status === "active" ? "" : ` <span class="chip mute">${esc(p.status)}</span>`}<br>
         <small>${esc(p.role_title || "No job title")}${rankOf[p.role_id] ? ` · ${esc(RANKS[rankOf[p.role_id]])}` : ""} · hired ${esc(fmtD(p.hire_date))}</small></div>
         <div class="pact"><button class="link" data-edit>Edit</button><button class="link" data-addpos>+ Position</button></div></div>
+      ${p.role_id && p.dept_id && companies.length > 1 ? `<div class="mirrors"><small>Same position in:</small> ${companies.filter((c) => c.id !== cur.id).map((c) => `<label class="tick"><input type="checkbox" data-mirror="${esc(c.id)}"${extrasOf(p.id).some((x) => x.company_id === c.id) ? " checked" : ""}> ${esc(c.short_code)}</label>`).join(" ")}</div>` : ""}
       ${extrasOf(p.id).map((x) => `<div class="between xpos"><small>➕ <b>${esc(x.company_code)}</b> · ${esc(x.dept_name)} · ${esc(x.role_title)}${x.note ? ` — ${esc(x.note)}` : ""}</small><button class="link" data-delpos="${esc(x.position_id)}">Remove</button></div>`).join("")}
       <form class="form egrid" data-eform hidden>${personFields(p)}<div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-closeform>Close</button></div></form>
       <form class="form egrid" data-pform hidden><p class="s">Main position: <b>${esc(cur.short_code)}</b> · ${esc(p.dept_name || "—")} · ${esc(p.role_title || "—")}. Leave and the login stay with the main company; this adds a second department or company.</p>
@@ -41,7 +44,7 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
   function personFields(p) {
     p = p || {};
     return `<label>Full name<input name="name" required maxlength="80" value="${esc(p.full_name || "")}"></label>
-      <label>Department<select name="dept">${opt(lk.departments, "id", (d) => d.name, p.dept_id, "— none —")}</select></label>
+      <label>Department<select name="dept">${opt(lk.departments, "id", deptLabel, p.dept_id, "— none —")}</select></label>
         <label>Job title<select name="role">${opt(lk.roles, "id", roleLabel, p.role_id, "— none —")}</select></label>
       <label>Hire date<input name="hire" type="date" value="${esc(p.hire_date || "")}"></label>
         <label>Employee no. <span class="opt">(optional)</span><input name="no" maxlength="30" value="${esc(p.employee_no || "")}"></label>
@@ -55,6 +58,18 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
     <div class="card"><div class="between"><b>Upload employee list</b><button class="link" data-tpl>Download blank template</button></div>
       <p class="s">Upload an Excel (.xlsx) or CSV file. You will see a preview first — nothing is saved until you confirm. Salary columns, if present, are stored for HR only.</p>
       <input type="file" id="empfile" accept=".xlsx,.csv" hidden><button class="btn block" data-pick>Choose Excel / CSV file…</button><div id="imp"></div></div>
+    <details class="card grp" id="deptbox"${state.deptOpen ? " open" : ""}><summary><b>Departments &amp; sections</b> <span class="chip mute">${depts.filter((d) => d.is_active).length}</span></summary>
+      <p class="s">A section belongs to a department (for example Supply Chain → PPIC, Logistics). Nothing is fixed: add, rename, move or switch off at any time. A section has no approver of its own: leave follows the org chart, or the primary approver ticked there.</p>
+      <form class="form egrid" id="adddept"><label>Name<input name="name" required maxlength="80" placeholder="e.g. PPIC"></label>
+        <label>Section of<select name="parent"><option value="">— a main department —</option>${depts.filter((d) => d.is_active && !d.parent_id).map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join("")}</select></label>
+        <div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Add</button></div></form>
+      ${depts.map((d) => `<div class="drow${d.parent_id ? " sec" : ""}${d.is_active ? "" : " off"}" data-d="${esc(d.id)}"><div class="between"><span><b>${esc(d.name)}</b>${d.parent_id ? ' <span class="chip mute">section</span>' : ""}${d.is_active ? "" : ' <span class="chip mute">switched off</span>'}
+          <small> · ${d.people} people${d.approver_name ? ` · ✓ approver: ${esc(d.approver_name)}${d.approver_has_login ? "" : " (no login yet)"}` : ""}</small></span>
+          <span class="pact"><button class="link" data-dedit>Edit</button>${d.parent_id || !d.is_active ? "" : '<button class="link" data-dsec>+ Section</button>'}<button class="link" data-dact="${d.is_active ? "0" : "1"}">${d.is_active ? "Switch off" : "Switch on"}</button></span></div>
+        <form class="form egrid" data-dform hidden><label>Name<input name="name" required maxlength="80" value="${esc(d.name)}"></label>
+          <label>Section of<select name="parent"><option value="">— a main department —</option>${depts.filter((x) => x.is_active && !x.parent_id && x.id !== d.id).map((x) => `<option value="${esc(x.id)}"${x.id === d.parent_id ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+          <div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-dclose>Close</button></div></form></div>`).join("") || "<small>No departments yet.</small>"}
+    </details>
     <div class="between"><h2>People</h2><button class="btn" data-addp>+ Add a person</button></div>
     <div id="addbox" hidden><form class="card form" id="addemp">${personFields(null)}<div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Add person</button><button class="btn" type="button" data-canceladd>Cancel</button></div></form></div>
     <input class="search" id="empq" type="search" placeholder="Search name, job title or department" value="${esc(state.empQuery || "")}">
@@ -74,6 +89,7 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
     p_employee_no: nz(f.no.value.trim()), p_status: f.status.value, p_reports_to: nz(f.rep.value) });
   const guard = async (btn, box, fn, ok) => { btn.disabled = true; if (box) box.innerHTML = ""; try { await fn(); toast(ok); await reload(); } catch (e) { if (box) box.innerHTML = errBox(e); else toast(e.message, true); btn.disabled = false; } };
 
+  el.querySelector("#deptbox").addEventListener("toggle", (e) => { state.deptOpen = e.target.open; });
   el.querySelector("#empq").oninput = (ev) => { state.empQuery = ev.target.value; const pos = ev.target.selectionStart; reload().then(() => { const i = el.querySelector("#empq"); i.focus(); i.setSelectionRange(pos, pos); }); };
   el.onclick = (ev) => {
     const co = ev.target.closest("[data-co]"); if (co) { state.empCompany = co.dataset.co; state.empQuery = ""; return reload(); }
@@ -81,6 +97,10 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
     if (ev.target.closest("[data-pick]")) return el.querySelector("#empfile").click();
     if (ev.target.closest("[data-addp]")) { el.querySelector("#addbox").hidden = false; return; }
     if (ev.target.closest("[data-canceladd]")) { el.querySelector("#addbox").hidden = true; return; }
+    const de = ev.target.closest("[data-dedit]"); if (de) { const f = de.closest(".drow").querySelector("[data-dform]"); f.hidden = !f.hidden; return; }
+    if (ev.target.closest("[data-dclose]")) { ev.target.closest("[data-dform]").hidden = true; return; }
+    const ds = ev.target.closest("[data-dsec]"); if (ds) { const f = el.querySelector("#adddept"); f.parent.value = ds.closest(".drow").dataset.d; f.name.focus(); f.scrollIntoView({ block: "center", behavior: "smooth" }); return; }
+    const da = ev.target.closest("[data-dact]"); if (da) { const on = da.dataset.dact === "1"; if (!on && !confirm("Switch this off? It must have no active people or sections.")) return; return guard(da, null, () => rpc("iaf_dept_set_active", { p_id: da.closest(".drow").dataset.d, p_active: on }), on ? "Switched on ✔" : "Switched off ✔"); }
     const dp = ev.target.closest("[data-delpos]"); if (dp) { if (!confirm("Remove this additional position?")) return; return guard(dp, null, () => rpc("iaf_position_delete", { p_id: dp.dataset.delpos }), "Position removed ✔"); }
     const c = ev.target.closest(".person"); if (!c) return;
     const sync = () => c.classList.toggle("open", !c.querySelector("[data-eform]").hidden || !c.querySelector("[data-pform]").hidden);
@@ -93,7 +113,7 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
     try {
       if (!xcache[coId]) { const [l, ppl] = await Promise.all([rpc("iaf_org_lookups", { p_company: coId }), rpc("iaf_company_people", { p_company: coId }).catch(() => [])]); xcache[coId] = { l, ppl }; }
       const { l, ppl } = xcache[coId], pid = f.closest(".person").dataset.id;
-      body.innerHTML = `<label>Department<select name="pdept">${opt(l.departments, "id", (d) => d.name, "", "— choose —")}</select></label>
+      body.innerHTML = `<label>Department<select name="pdept">${opt(l.departments, "id", deptName(l.departments), "", "— choose —")}</select></label>
         <label>Job title<select name="prole">${opt(l.roles, "id", roleLabel, "", "— choose —")}</select></label></div>
         <label>Reports to <span class="opt">(optional)</span><select name="prep">${opt(ppl.filter((x) => x.id !== pid), "id", (x) => `${x.full_name} (${x.home_code})`, "", "— nobody / set later in Org chart —")}</select></label>
         <label>Main responsibility there <span class="opt">(optional)</span><input name="pnote" maxlength="120" placeholder="e.g. Oversees plant maintenance"></label>`;
@@ -101,6 +121,8 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
   }
   el.onsubmit = (ev) => {
     ev.preventDefault(); const f = ev.target, btn = f.querySelector("button[type=submit]"), box = f.querySelector(".eerr");
+    if (f.id === "adddept") return guard(btn, box, () => rpc("iaf_dept_save", { p_id: null, p_company: cur.id, p_name: f.name.value.trim(), p_parent: nz(f.parent.value) }), "Added ✔");
+    if (f.matches("[data-dform]")) return guard(btn, box, () => rpc("iaf_dept_save", { p_id: f.closest(".drow").dataset.d, p_company: cur.id, p_name: f.name.value.trim(), p_parent: nz(f.parent.value) }), "Saved ✔");
     if (f.id === "addrole") return guard(btn, box, () => rpc("iaf_ensure_role_rank", { p_company: cur.id, p_title: f.title.value.trim(), p_rank: Number(f.rank.value) }), "Job title added ✔");
     if (f.matches("[data-pform]")) {
       if (!f.pdept || !f.pdept.value || !f.prole.value) { box.innerHTML = errBox(new Error("Choose a department and a job title.")); return; }
@@ -110,6 +132,10 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
     if (f.matches("[data-eform]")) { const id = f.closest(".person").dataset.id; return guard(btn, box, () => rpc("iaf_employee_save", saveArgs(f, id)), "Saved ✔"); }
   };
   el.onchange = async (ev) => {
+    const mir = ev.target.dataset && ev.target.dataset.mirror;
+    if (mir) { const on = ev.target.checked, id = ev.target.closest(".person").dataset.id;
+      if (!on && !confirm("Remove this person's position in that company? Anyone reporting to them there is moved off their line.")) { ev.target.checked = true; return; }
+      ev.target.disabled = true; try { await rpc("iaf_position_mirror", { p_employee_id: id, p_company: mir, p_on: on }); toast(on ? "Added to that company ✔" : "Removed ✔"); await reload(); } catch (e) { toast(e.message, true); ev.target.checked = !on; ev.target.disabled = false; } return; }
     if (ev.target.name === "pco") return loadPosBody(ev.target.closest("form"), ev.target.value);
     const row = ev.target.closest(".lvl"); if (!row) return;
     try { await rpc("iaf_set_role_rank", { p_role_id: row.dataset.role, p_rank: Number(ev.target.value) }); toast("Saved ✔"); await reload(); } catch (e) { toast(e.message, true); }
