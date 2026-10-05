@@ -65,10 +65,13 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
         <div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Add</button></div></form>
       ${depts.map((d) => `<div class="drow${d.parent_id ? " sec" : ""}${d.is_active ? "" : " off"}" data-d="${esc(d.id)}"><div class="between"><span><b>${esc(d.name)}</b>${d.parent_id ? ' <span class="chip mute">section</span>' : ""}${d.is_active ? "" : ' <span class="chip mute">switched off</span>'}
           <small> · ${d.people} people${d.approver_name ? ` · ✓ approver: ${esc(d.approver_name)}${d.approver_has_login ? "" : " (no login yet)"}` : ""}</small></span>
-          <span class="pact"><button class="link" data-dedit>Edit</button>${d.parent_id || !d.is_active ? "" : '<button class="link" data-dsec>+ Section</button>'}<button class="link" data-dact="${d.is_active ? "0" : "1"}">${d.is_active ? "Switch off" : "Switch on"}</button></span></div>
+          <span class="pact"><button class="link" data-dedit>Edit</button>${d.parent_id || !d.is_active ? "" : '<button class="link" data-dsec>+ Section</button>'}${d.is_active ? '<button class="link" data-dremoveopen>Remove</button>' : '<button class="link" data-dact="1">Switch on</button>'}</span></div>
         <form class="form egrid" data-dform hidden><label>Name<input name="name" required maxlength="80" value="${esc(d.name)}"></label>
           <label>Section of<select name="parent"><option value="">— a main department —</option>${depts.filter((x) => x.is_active && !x.parent_id && x.id !== d.id).map((x) => `<option value="${esc(x.id)}"${x.id === d.parent_id ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
-          <div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-dclose>Close</button></div></form></div>`).join("") || "<small>No departments yet.</small>"}
+          <div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-dclose>Close</button></div></form>
+        <form class="form egrid" data-dremove hidden><p class="s">Removing hides this ${d.parent_id ? "section" : "department"} (history is kept). Anyone still in it${d.parent_id ? "" : ", and its sections,"} moves to the one you choose.</p>
+          <label>Move everyone to<select name="to"><option value="">— nobody is here —</option>${depts.filter((x) => x.is_active && x.id !== d.id && x.parent_id !== d.id && !(d.parent_id === null && x.parent_id)).map((x) => `<option value="${esc(x.id)}">${x.parent_id ? "↳ " : ""}${esc(x.name)}</option>`).join("")}</select></label>
+          <div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Remove</button><button class="btn" type="button" data-dclose>Close</button></div></form></div>`).join("") || "<small>No departments yet.</small>"}
     </details>
     <div class="between"><h2>People</h2><button class="btn" data-addp>+ Add a person</button></div>
     <div id="addbox" hidden><form class="card form" id="addemp">${personFields(null)}<div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Add person</button><button class="btn" type="button" data-canceladd>Cancel</button></div></form></div>
@@ -98,9 +101,10 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
     if (ev.target.closest("[data-addp]")) { el.querySelector("#addbox").hidden = false; return; }
     if (ev.target.closest("[data-canceladd]")) { el.querySelector("#addbox").hidden = true; return; }
     const de = ev.target.closest("[data-dedit]"); if (de) { const f = de.closest(".drow").querySelector("[data-dform]"); f.hidden = !f.hidden; return; }
-    if (ev.target.closest("[data-dclose]")) { ev.target.closest("[data-dform]").hidden = true; return; }
+    const dro = ev.target.closest("[data-dremoveopen]"); if (dro) { const f = dro.closest(".drow").querySelector("[data-dremove]"); f.hidden = !f.hidden; return; }
+    if (ev.target.closest("[data-dclose]")) { ev.target.closest("form").hidden = true; return; }
     const ds = ev.target.closest("[data-dsec]"); if (ds) { const f = el.querySelector("#adddept"); f.parent.value = ds.closest(".drow").dataset.d; f.name.focus(); f.scrollIntoView({ block: "center", behavior: "smooth" }); return; }
-    const da = ev.target.closest("[data-dact]"); if (da) { const on = da.dataset.dact === "1"; if (!on && !confirm("Switch this off? It must have no active people or sections.")) return; return guard(da, null, () => rpc("iaf_dept_set_active", { p_id: da.closest(".drow").dataset.d, p_active: on }), on ? "Switched on ✔" : "Switched off ✔"); }
+    const da = ev.target.closest("[data-dact]"); if (da) return guard(da, null, () => rpc("iaf_dept_set_active", { p_id: da.closest(".drow").dataset.d, p_active: true }), "Switched on ✔");
     const dp = ev.target.closest("[data-delpos]"); if (dp) { if (!confirm("Remove this additional position?")) return; return guard(dp, null, () => rpc("iaf_position_delete", { p_id: dp.dataset.delpos }), "Position removed ✔"); }
     const c = ev.target.closest(".person"); if (!c) return;
     const sync = () => c.classList.toggle("open", !c.querySelector("[data-eform]").hidden || !c.querySelector("[data-pform]").hidden);
@@ -122,6 +126,7 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
   el.onsubmit = (ev) => {
     ev.preventDefault(); const f = ev.target, btn = f.querySelector("button[type=submit]"), box = f.querySelector(".eerr");
     if (f.id === "adddept") return guard(btn, box, () => rpc("iaf_dept_save", { p_id: null, p_company: cur.id, p_name: f.name.value.trim(), p_parent: nz(f.parent.value) }), "Added ✔");
+    if (f.matches("[data-dremove]")) return guard(btn, box, () => rpc("iaf_dept_remove", { p_id: f.closest(".drow").dataset.d, p_move_to: nz(f.to.value) }), "Removed ✔");
     if (f.matches("[data-dform]")) return guard(btn, box, () => rpc("iaf_dept_save", { p_id: f.closest(".drow").dataset.d, p_company: cur.id, p_name: f.name.value.trim(), p_parent: nz(f.parent.value) }), "Saved ✔");
     if (f.id === "addrole") return guard(btn, box, () => rpc("iaf_ensure_role_rank", { p_company: cur.id, p_title: f.title.value.trim(), p_rank: Number(f.rank.value) }), "Job title added ✔");
     if (f.matches("[data-pform]")) {
