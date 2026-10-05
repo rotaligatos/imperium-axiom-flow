@@ -1,0 +1,298 @@
+import { isConfigured, getSession, userId, signIn, signOut, rest, rpc } from "./api.js";
+
+const $app = document.getElementById("app");
+const $toast = document.getElementById("toast");
+const YEAR = new Date().getFullYear();
+
+// ---------- helpers ----------
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pd = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const todayStr = () => ymd(new Date());
+const fmtD = (s) => pd(s).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+const fmtRange = (a, b) => (a === b ? fmtD(a) : `${fmtD(a)} – ${fmtD(b)}`);
+const spanDays = (a, b) => Math.round((pd(b) - pd(a)) / 86400000) + 1;
+const num = (n) => { const x = Number(n); return Number.isInteger(x) ? String(x) : x.toFixed(2).replace(/0$/, ""); };
+const STATUS = {
+  SUBMITTED: ["Submitted", "wait"], PENDING_SUPERVISOR: ["With Supervisor", "wait"], PENDING_MANAGER: ["With Manager", "wait"],
+  PENDING_HR_MANAGER: ["With HR Manager", "wait"], COUNTERED: ["Counter-proposal", "warn"], APPROVED: ["Approved", "ok"],
+  REJECTED: ["Rejected", "bad"], FILED: ["Filed", "ok"], CANCELLED: ["Cancelled", "mute"] };
+const CANCELLABLE = ["SUBMITTED", "PENDING_SUPERVISOR", "PENDING_MANAGER", "PENDING_HR_MANAGER", "COUNTERED"];
+const PENDING_FOR_APPROVER = ["PENDING_SUPERVISOR", "PENDING_MANAGER", "PENDING_HR_MANAGER"];
+const chip = (st) => { const [t, k] = STATUS[st] || [st, "mute"]; return `<span class="chip ${k}">${esc(t)}</span>`; };
+const initials = (n) => (n || "?").split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+
+let toastTimer;
+function toast(msg, bad = false) {
+  $toast.textContent = msg; $toast.className = "show" + (bad ? " bad" : "");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => ($toast.className = ""), 4200);
+}
+const state = { me: null, types: null, pending: 0, isApprover: false };
+let navToken = 0;
+
+// ---------- data ----------
+async function loadMe() {
+  const rows = await rest(`users?id=eq.${userId()}&select=id,full_name,company_id,dept_id,manager_id,status`);
+  if (!rows.length) throw new Error("Your login is not linked to an employee record yet. Please contact HR.");
+  state.me = rows[0];
+}
+async function loadTypes() {
+  if (!state.types) state.types = await rest("leave_types?is_active=eq.true&select=id,code,display_name,tracks_balance&order=display_name");
+  return state.types;
+}
+async function refreshBadge() {
+  try {
+    const [p, a] = await Promise.all([
+      rest(`leave_requests?current_approver_id=eq.${userId()}&status=in.(${PENDING_FOR_APPROVER.join(",")})&select=id`),
+      rest(`leave_approvals?approver_id=eq.${userId()}&select=id&limit=1`) ]);
+    state.pending = p.length; state.isApprover = p.length > 0 || a.length > 0;
+    document.querySelectorAll("[data-badge]").forEach((el) => { el.textContent = state.pending; el.hidden = !state.pending; });
+    document.querySelectorAll("[data-approver-nav]").forEach((el) => { el.hidden = !state.isApprover; });
+  } catch { /* badge is best-effort */ }
+}
+
+// ---------- shell ----------
+function shell(active, title, body) {
+  const nav = [["#/", "Home", "🏠", "home"], ["#/file", "File leave", "➕", "file"], ["#/requests", "My requests", "📄", "requests"],
+    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"]];
+  const links = nav.map(([h, t, ic, k]) => `<a href="${h}" class="${active === k ? "on" : ""}" ${k === "approvals" ? 'data-approver-nav ' + (state.isApprover ? "" : "hidden") : ""}>
+      <span class="ic" aria-hidden="true">${ic}</span><span>${t}</span>${k === "approvals" ? `<b class="badge" data-badge ${state.pending ? "" : "hidden"}>${state.pending}</b>` : ""}</a>`).join("");
+  $app.innerHTML = `<div class="layout">
+    <aside class="side"><div class="brand"><img class="logo" src="icons/icon-192.png" alt="IAF"><div><strong>Imperium Axiom Flow</strong><small>HR · Leave</small></div></div>
+      <nav>${links}</nav>
+      <div class="me"><div class="av">${esc(initials(state.me?.full_name))}</div><div class="who">${esc(state.me?.full_name)}</div>
+        <button class="link" data-act="signout">Sign out</button></div></aside>
+    <main><header class="top"><h1>${esc(title)}</h1><button class="link only-mobile" data-act="signout">Sign out</button></header>
+      <div class="content">${body}</div></main>
+    <nav class="tabs">${links}</nav></div>`;
+}
+const loading = (t = "Loading…") => `<div class="empty">${esc(t)}</div>`;
+const errBox = (e) => `<div class="alert bad">${esc(e.message || e)}</div>`;
+
+// ---------- views ----------
+async function viewLogin() {
+  if (!isConfigured()) {
+    $app.innerHTML = `<div class="auth"><div class="card"><img class="logo big" src="icons/icon-192.png" alt="IAF"><h1>Setup needed</h1>
+      <p>The app has no database key yet. Open <code>config.js</code> and paste the project's public <b>anon / publishable</b> key into <code>SUPABASE_ANON_KEY</code>. Never use the secret/service_role key.</p></div></div>`;
+    return;
+  }
+  $app.innerHTML = `<div class="auth"><form class="card" id="login" autocomplete="on">
+    <img class="logo big" src="icons/icon-192.png" alt="IAF"><h1>Imperium Axiom Flow</h1><p class="sub">Sign in with your company account</p>
+    <label>Email<input name="email" type="email" inputmode="email" autocomplete="username" autocapitalize="none" required></label>
+    <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+    <div id="lerr"></div><button class="btn primary block" type="submit">Sign in</button></form></div>`;
+  document.getElementById("login").addEventListener("submit", async (ev) => {
+    ev.preventDefault(); const f = ev.target; const b = f.querySelector("button"); b.disabled = true; b.textContent = "Signing in…";
+    try { await signIn(f.email.value.trim(), f.password.value); await bootSignedIn(); }
+    catch (e) { document.getElementById("lerr").innerHTML = errBox(e); b.disabled = false; b.textContent = "Sign in"; }
+  });
+}
+
+async function viewHome(tok) {
+  shell("home", `Hello, ${(state.me.full_name || "").split(" ")[0]}`, loading());
+  const el = document.querySelector(".content");
+  try {
+    const [bal, reqs] = await Promise.all([
+      rest(`vw_leave_balances_live?user_id=eq.${userId()}&year=eq.${YEAR}&select=leave_type_code,total_allotment,used,remaining`),
+      rest(`leave_requests?requester_id=eq.${userId()}&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name)&order=created_at.desc&limit=5`) ]);
+    if (tok !== navToken) return;
+    const cards = ["VL", "SL"].map((c) => {
+      const b = bal.find((x) => x.leave_type_code === c);
+      const name = c === "VL" ? "Vacation Leave" : "Sick Leave";
+      if (!b) return `<div class="bal"><div class="bn">${name}</div><div class="bv">—</div><div class="bs">No ${YEAR} balance set up yet</div></div>`;
+      const pct = Number(b.total_allotment) ? Math.max(0, Math.min(100, (Number(b.remaining) / Number(b.total_allotment)) * 100)) : 0;
+      return `<div class="bal"><div class="bn">${name}</div><div class="bv">${num(b.remaining)}<small> days left</small></div>
+        <div class="bar"><i style="width:${pct}%"></i></div><div class="bs">${num(b.used)} used of ${num(b.total_allotment)} in ${YEAR}</div></div>`; }).join("");
+    const recent = reqs.length ? reqs.map(reqRow).join("") : `<div class="empty">No requests yet.</div>`;
+    el.innerHTML = `<div class="bals">${cards}</div>
+      <a class="btn primary block" href="#/file">➕ File a leave</a>
+      ${state.pending ? `<a class="notice" href="#/approvals"><b>${state.pending}</b> request${state.pending > 1 ? "s" : ""} waiting for your decision →</a>` : ""}
+      <h2>Recent requests</h2><div class="list">${recent}</div>
+      ${reqs.length ? `<a class="link" href="#/requests">See all →</a>` : ""}`;
+  } catch (e) { el.innerHTML = errBox(e); }
+}
+
+function reqRow(r) {
+  return `<a class="row" href="#/request/${esc(r.id)}"><div class="grow"><div class="t">${esc(r.leave_types?.display_name || "Leave")}${r.requester ? ` · ${esc(r.requester.full_name)}` : ""}</div>
+    <div class="s">${esc(fmtRange(r.start_date, r.end_date))} · ${num(r.days_requested)} day${Number(r.days_requested) === 1 ? "" : "s"}</div></div>${chip(r.status)}</a>`;
+}
+
+async function viewRequests(tok) {
+  shell("requests", "My requests", loading());
+  const el = document.querySelector(".content");
+  try {
+    const rows = await rest(`leave_requests?requester_id=eq.${userId()}&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name)&order=created_at.desc&limit=100`);
+    if (tok !== navToken) return;
+    el.innerHTML = rows.length ? `<div class="list">${rows.map(reqRow).join("")}</div>` : `<div class="empty">You haven't filed any leave yet.<br><a class="btn primary" href="#/file">File a leave</a></div>`;
+  } catch (e) { el.innerHTML = errBox(e); }
+}
+
+async function viewFile(tok) {
+  shell("file", "File a leave", loading());
+  const el = document.querySelector(".content");
+  try {
+    const types = await loadTypes(); if (tok !== navToken) return;
+    const order = ["VL", "SL"]; const sorted = [...types].sort((a, b) => (order.indexOf(a.code) + 1 || 99) - (order.indexOf(b.code) + 1 || 99) || a.display_name.localeCompare(b.display_name));
+    const t = todayStr();
+    el.innerHTML = `<form id="ff" class="form">
+      <label>Leave type<select name="type" required>${sorted.map((x) => `<option value="${esc(x.code)}">${esc(x.display_name)}</option>`).join("")}</select></label>
+      <div class="two"><label>From<input type="date" name="start" value="${t}" required></label><label>To<input type="date" name="end" value="${t}" required></label></div>
+      <label>Number of days<input type="number" name="days" min="0.5" step="0.5" inputmode="decimal" value="1" required>
+        <small id="dayhint"></small></label>
+      <label><span>Reason <span class="opt">(optional)</span></span><textarea name="reason" rows="3" maxlength="500"></textarea></label>
+      <label class="check" id="covrow" hidden><input type="checkbox" name="cov"><span>Use my Vacation Leave to cover an exhausted Sick Leave<small>This needs extra approval from the HR Manager.</small></span></label>
+      <div id="ferr"></div><button class="btn primary block" type="submit">Submit for approval</button>
+      <p class="fine">Your request goes to your approver automatically. You'll see its progress under “My requests”.</p></form>`;
+    const f = document.getElementById("ff");
+    let touchedDays = false;
+    const sync = () => {
+      const s = f.start.value, e = f.end.value; const hint = document.getElementById("dayhint");
+      if (s && e && e >= s) { const span = spanDays(s, e); f.days.max = span; if (!touchedDays) f.days.value = span;
+        hint.textContent = `${span} calendar day${span > 1 ? "s" : ""} selected — lower this to skip weekends/rest days, or use 0.5 for a half day.`; }
+      else hint.textContent = "“To” must be on or after “From”.";
+      document.getElementById("covrow").hidden = f.type.value !== "VL";
+      if (f.type.value !== "VL") f.cov.checked = false;
+    };
+    f.days.addEventListener("input", () => (touchedDays = true));
+    ["start", "end", "type"].forEach((n) => f[n].addEventListener("change", () => { if (n !== "type") touchedDays = false; if (n === "start" && f.end.value < f.start.value) f.end.value = f.start.value; sync(); }));
+    sync();
+    f.addEventListener("submit", async (ev) => {
+      ev.preventDefault(); const btn = f.querySelector("button[type=submit]"); btn.disabled = true; btn.textContent = "Submitting…";
+      document.getElementById("ferr").innerHTML = "";
+      try {
+        const id = await rpc("iaf_leave_submit", { p_leave_type_code: f.type.value, p_start_date: f.start.value, p_end_date: f.end.value,
+          p_days: Number(f.days.value), p_reason: f.reason.value.trim() || null, p_is_wfh: f.type.value === "WFH", p_is_vl_covering_sl: !!f.cov.checked });
+        toast("Leave submitted ✔"); location.hash = `#/request/${id}`;
+      } catch (e) { document.getElementById("ferr").innerHTML = errBox(e); btn.disabled = false; btn.textContent = "Submit for approval"; }
+    });
+  } catch (e) { el.innerHTML = errBox(e); }
+}
+
+async function viewApprovals(tok) {
+  shell("approvals", "Approvals", loading());
+  const el = document.querySelector(".content");
+  try {
+    const rows = await rest(`leave_requests?current_approver_id=eq.${userId()}&status=in.(${PENDING_FOR_APPROVER.join(",")})&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name),requester:users!requester_id(full_name)&order=created_at`);
+    if (tok !== navToken) return;
+    state.pending = rows.length; refreshBadge();
+    el.innerHTML = rows.length ? `<div class="list">${rows.map(reqRow).join("")}</div>` : `<div class="empty">🎉 Nothing waiting for you.</div>`;
+  } catch (e) { el.innerHTML = errBox(e); }
+}
+
+async function viewRequest(tok, id) {
+  shell(location.hash.includes("from=ap") ? "approvals" : "requests", "Leave request", loading());
+  const el = document.querySelector(".content");
+  try {
+    const [rows, apps] = await Promise.all([
+      rest(`leave_requests?id=eq.${encodeURIComponent(id)}&select=*,leave_types(code,display_name),requester:users!requester_id(full_name),approver:users!current_approver_id(full_name)`),
+      rest(`leave_approvals?leave_request_id=eq.${encodeURIComponent(id)}&select=*,approver:users!approver_id(full_name)&order=created_at`) ]);
+    if (tok !== navToken) return;
+    const r = rows[0]; if (!r) { el.innerHTML = `<div class="empty">This request isn't available.</div>`; return; }
+    const mine = r.requester_id === userId();
+    const lastCounter = [...apps].reverse().find((a) => a.action === "COUNTERED");
+    let actions = "";
+    if (mine && r.status === "COUNTERED" && lastCounter) {
+      const pdays = lastCounter.proposed_days ?? spanDays(lastCounter.proposed_start_date, lastCounter.proposed_end_date);
+      actions += `<div class="alert warn"><b>${esc(lastCounter.approver?.full_name)}</b> proposed different dates:<br><b>${esc(fmtRange(lastCounter.proposed_start_date, lastCounter.proposed_end_date))}</b> · ${num(pdays)} day(s)
+        ${lastCounter.notes ? `<br><i>“${esc(lastCounter.notes)}”</i>` : ""}<br><small>If you accept, it goes through the full approval chain again.</small></div>
+        <div class="btns"><button class="btn primary" data-act="accept">Accept proposal</button><button class="btn" data-act="decline">Decline &amp; cancel</button></div>`;
+    }
+    if (r.current_approver_id === userId() && PENDING_FOR_APPROVER.includes(r.status)) {
+      actions += `<div class="card"><h3>Your decision</h3><label><span>Notes <span class="opt">(optional)</span></span><textarea id="anote" rows="2" maxlength="500"></textarea></label>
+        <div class="btns"><button class="btn primary" data-act="approve">Approve</button><button class="btn danger" data-act="reject">Reject</button>
+        ${r.status !== "PENDING_HR_MANAGER" ? `<button class="btn" data-act="counter-open">Propose other dates</button>` : ""}</div>
+        <form id="cform" hidden class="form"><div class="two"><label>From<input type="date" name="s" value="${esc(r.start_date)}" required></label><label>To<input type="date" name="e" value="${esc(r.end_date)}" required></label></div>
+        <label>Days<input type="number" name="d" min="0.5" step="0.5" value="${esc(num(r.days_requested))}" required></label>
+        <button class="btn primary block" type="submit">Send counter-proposal</button></form></div>`;
+    }
+    if (mine && CANCELLABLE.includes(r.status) && r.status !== "COUNTERED") actions += `<button class="btn danger block" data-act="cancel">Cancel this request</button>`;
+    const tl = apps.map((a) => `<li><b>${esc(a.approver?.full_name || "Approver")}</b> ${a.action === "APPROVED" ? "approved" : a.action === "REJECTED" ? "rejected" : "proposed other dates"}
+      <small>${esc(a.tier.replace("_", " ").toLowerCase())} · ${esc(new Date(a.created_at).toLocaleString())}</small>${a.notes ? `<em>“${esc(a.notes)}”</em>` : ""}</li>`).join("");
+    el.innerHTML = `<div class="card"><div class="between"><h2 class="nm">${esc(r.leave_types?.display_name)}</h2>${chip(r.status)}</div>
+      ${!mine ? `<p class="s">Requested by <b>${esc(r.requester?.full_name)}</b></p>` : ""}
+      <dl><dt>Dates</dt><dd>${esc(fmtRange(r.start_date, r.end_date))}</dd><dt>Days</dt><dd>${num(r.days_requested)}</dd>
+      ${r.reason ? `<dt>Reason</dt><dd>${esc(r.reason)}</dd>` : ""}
+      ${r.is_vl_covering_sl ? `<dt>Note</dt><dd>VL covering exhausted SL (HR Manager approval required)</dd>` : ""}
+      ${r.is_unpaid_loa_conversion ? `<dt>Note</dt><dd>Balance ran out — converted to unpaid leave</dd>` : ""}
+      ${r.approver && PENDING_FOR_APPROVER.includes(r.status) ? `<dt>Waiting on</dt><dd>${esc(r.approver.full_name)}</dd>` : ""}</dl></div>
+      ${actions}<h3>History</h3>${tl ? `<ol class="tl">${tl}</ol>` : `<div class="empty small">No decisions yet.</div>`}`;
+    wireDetail(r);
+  } catch (e) { el.innerHTML = errBox(e); }
+}
+
+function wireDetail(r) {
+  const act = async (btn, fn, msg) => {
+    document.querySelectorAll(".content button").forEach((b) => (b.disabled = true));
+    try { const out = await fn(); toast(msg(out)); await refreshBadge(); route(); }
+    catch (e) { toast(e.message, true); document.querySelectorAll(".content button").forEach((b) => (b.disabled = false)); }
+  };
+  const note = () => document.getElementById("anote")?.value.trim() || null;
+  document.querySelector(".content").onclick = (ev) => {
+    const b = ev.target.closest("[data-act]"); if (!b) return; const a = b.dataset.act;
+    if (a === "approve") act(b, () => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "APPROVED", p_notes: note() }), (s) => `Approved → ${(STATUS[s] || [s])[0]}`);
+    if (a === "reject") { if (confirm("Reject this request?")) act(b, () => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "REJECTED", p_notes: note() }), () => "Request rejected"); }
+    if (a === "counter-open") document.getElementById("cform").hidden = false;
+    if (a === "accept") act(b, () => rpc("iaf_leave_respond_counter", { p_request_id: r.id, p_accept: true }), () => "Accepted — sent back for approval");
+    if (a === "decline") { if (confirm("Decline the proposal? This cancels your request.")) act(b, () => rpc("iaf_leave_respond_counter", { p_request_id: r.id, p_accept: false }), () => "Request cancelled"); }
+    if (a === "cancel") { if (confirm("Cancel this request?")) act(b, () => rpc("iaf_leave_cancel", { p_request_id: r.id }), () => "Request cancelled"); }
+  };
+  document.getElementById("cform")?.addEventListener("submit", (ev) => {
+    ev.preventDefault(); const f = ev.target;
+    act(null, () => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "COUNTERED", p_notes: note(), p_proposed_start: f.s.value, p_proposed_end: f.e.value, p_proposed_days: Number(f.d.value) }), () => "Counter-proposal sent");
+  });
+}
+
+let calMonth = null;
+async function viewCalendar(tok) {
+  shell("calendar", "Who's out", loading());
+  const el = document.querySelector(".content");
+  const now = new Date(); calMonth ||= new Date(now.getFullYear(), now.getMonth(), 1);
+  try {
+    const first = calMonth, last = new Date(first.getFullYear(), first.getMonth() + 1, 0);
+    const rows = await rest(`vw_leave_calendar?start_date=lte.${ymd(last)}&end_date=gte.${ymd(first)}&select=full_name,leave_type_code,start_date,end_date,is_wfh&order=start_date`);
+    if (tok !== navToken) return;
+    const byDay = {};
+    rows.forEach((r) => { for (let d = new Date(Math.max(pd(r.start_date), first)); d <= Math.min(pd(r.end_date), last); d.setDate(d.getDate() + 1)) (byDay[ymd(d)] ||= []).push(r); });
+    const lead = first.getDay(); let cells = ["S", "M", "T", "W", "T", "F", "S"].map((d) => `<div class="dow">${d}</div>`).join("") + '<div></div>'.repeat(lead);
+    for (let i = 1; i <= last.getDate(); i++) { const k = ymd(new Date(first.getFullYear(), first.getMonth(), i)); const n = byDay[k]?.length || 0;
+      cells += `<button class="day ${n ? "has" : ""} ${k === todayStr() ? "today" : ""}" data-day="${k}">${i}${n ? `<i>${n}</i>` : ""}</button>`; }
+    el.innerHTML = `<div class="between mhead"><button class="btn sm" data-m="-1" aria-label="Previous month">‹</button><h2>${first.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</h2><button class="btn sm" data-m="1" aria-label="Next month">›</button></div>
+      <div class="grid">${cells}</div><div id="dayinfo" class="list"></div>`;
+    const show = (k) => { document.getElementById("dayinfo").innerHTML = (byDay[k] || []).length
+      ? `<h3>${esc(fmtD(k))}</h3>` + byDay[k].map((r) => `<div class="row"><div class="av sm">${esc(initials(r.full_name))}</div><div class="grow"><div class="t">${esc(r.full_name)}</div><div class="s">${esc(r.leave_type_code)}${r.is_wfh ? " · WFH" : ""} · ${esc(fmtRange(r.start_date, r.end_date))}</div></div></div>`).join("")
+      : `<h3>${esc(fmtD(k))}</h3><div class="empty small">Nobody is out.</div>`; };
+    show(todayStr().slice(0, 7) === ymd(first).slice(0, 7) ? todayStr() : ymd(first));
+    el.onclick = (ev) => { const m = ev.target.closest("[data-m]"); if (m) { calMonth = new Date(first.getFullYear(), first.getMonth() + Number(m.dataset.m), 1); route(); return; }
+      const d = ev.target.closest("[data-day]"); if (d) show(d.dataset.day); };
+  } catch (e) { el.innerHTML = errBox(e); }
+}
+
+// ---------- routing / boot ----------
+async function route() {
+  if (!getSession()) return viewLogin();
+  const tok = ++navToken; const h = location.hash.replace(/^#/, "") || "/";
+  const [, p, arg] = h.split("?")[0].split("/");
+  if (p === "file") return viewFile(tok);
+  if (p === "requests") return viewRequests(tok);
+  if (p === "approvals") return viewApprovals(tok);
+  if (p === "request" && arg) return viewRequest(tok, arg);
+  if (p === "calendar") return viewCalendar(tok);
+  return viewHome(tok);
+}
+document.addEventListener("click", async (ev) => { $toast.className = "";
+  if (ev.target.closest("[data-act=signout]")) { await signOut(); state.me = null; state.isApprover = false; state.pending = 0; location.hash = "#/"; route(); }
+});
+window.addEventListener("hashchange", route);
+async function bootSignedIn() {
+  try { await loadMe(); } catch (e) {
+    if (e.status === 401) { await signOut(); return viewLogin(); }
+    $app.innerHTML = `<div class="auth"><div class="card"><h1>Can't open your account</h1>${errBox(e)}<button class="btn block" data-act="signout">Sign out</button></div></div>`; return; }
+  await refreshBadge(); route();
+}
+async function start() {
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  if (getSession()) await bootSignedIn(); else viewLogin();
+  const tick = () => getSession() && state.me && refreshBadge();
+  setInterval(tick, 60000); document.addEventListener("visibilitychange", () => !document.hidden && tick());
+}
+start();
