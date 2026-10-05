@@ -38,10 +38,11 @@ export async function renderOrg(el, { rpc, esc, toast, errBox, state }) {
   const kids = {}; view.forEach((p) => { const pa = parentOf(p); if (pa) (kids[pa] ||= []).push(p); });
   const byRank = (a, b) => b.role_level - a.role_level || a.full_name.localeCompare(b.full_name);
   const roots = view.filter((p) => !parentOf(p)).sort(byRank);
+  const tops = roots.filter((p) => kids[p.nid]), lone = roots.filter((p) => !kids[p.nid]);
   const descendants = (id, acc = new Set()) => { (kids[id] || []).forEach((k) => { acc.add(k.nid); descendants(k.nid, acc); }); return acc; };
   const sel = state.orgSel && byId[state.orgSel] ? byId[state.orgSel] : null;
 
-  const avatar = (p) => (photo[p.emp] ? `<img class="oav" src="${esc(photo[p.emp])}" alt="">` : `<span class="oav ini">${esc(initials(p.full_name))}</span>`);
+  const avatar = (p) => (photo[p.emp] ? `<img class="oav" draggable="false" src="${esc(photo[p.emp])}" alt="">` : `<span class="oav ini">${esc(initials(p.full_name))}</span>`);
   const node = (p) => {
     const outside = p.mgr && !parentOf(p) && nameOf[p.mgr];
     return `<div class="onode${sel && sel.nid === p.nid ? " sel" : ""}${p.extra ? " xnode" : ""}" data-id="${esc(p.nid)}" data-drop>
@@ -59,7 +60,9 @@ export async function renderOrg(el, { rpc, esc, toast, errBox, state }) {
     <div class="orgbar"><label>Department<select id="orgdept"><option value="">All departments</option>${lk.departments.map((d) => `<option value="${esc(d.id)}"${d.id === dept ? " selected" : ""}>${esc(d.name)}</option>`).join("")}</select></label>
       <small>${view.length} people${dept ? "" : " in the company"} · drag the ⠿ handle (or the whole box with a mouse) onto the person they report to · tap a box to edit</small></div>
     <div class="otop" data-drop data-top>⬆ Drop here to put someone at the top (no manager)</div>
-    <div class="otree">${roots.length ? `<ul class="root">${roots.map(tree).join("")}</ul>` : `<div class="empty">Nobody in this department yet. Add or import people in the Employees tab.</div>`}</div>
+    <div class="otree">${tops.length ? `<ul class="root">${tops.map(tree).join("")}</ul>` : ""}
+      ${lone.length ? `<div class="olone"><div class="olh"><b>${tops.length ? "Not placed under anyone yet" : "Nobody is placed yet"}</b> <small>(${lone.length}) — drag a name onto their manager</small></div><div class="olg">${lone.map(node).join("")}</div></div>` : ""}
+      ${roots.length ? "" : `<div class="empty">Nobody in this department yet. Add or import people in the Employees tab.</div>`}</div>
     ${sel ? `<div class="card osel"><div class="between"><div class="orow">${avatar(sel)}<div><b>${esc(sel.full_name)}</b><br><small>${esc(sel.role_title || "No job title")}${sel.role_level ? ` · level ${sel.role_level} (${LEVELS[sel.role_level]})` : ""} · ${esc(sel.dept_name || "no department")}${sel.extra ? ` · <b>extra position</b>${sel.homeSame ? "" : ` (main company ${esc(sel.home)})`}${sel.note ? ` — ${esc(sel.note)}` : ""}` : ""}</small></div></div>
         <button class="link" data-close>Close</button></div>
       <label>Reports to<select id="osel-rep">${optPeople(sel.emp, sel.mgr)}</select></label>
@@ -112,13 +115,25 @@ export async function renderOrg(el, { rpc, esc, toast, errBox, state }) {
   el.onpointerdown = (ev) => {
     const n = ev.target.closest(".onode"); if (!n || ev.button > 0) return;
     if (ev.pointerType !== "mouse" && !ev.target.closest(".grab")) return;        // touch: only the handle drags, so the page can still scroll
-    drag = { id: n.dataset.id, x: ev.clientX, y: ev.clientY, on: false, node: n, bad: descendants(n.dataset.id) }; drag.bad.add(n.dataset.id);
-    if (ev.pointerType !== "mouse") { ev.preventDefault(); n.setPointerCapture?.(ev.pointerId); }
+    drag = { id: n.dataset.id, x: ev.clientX, y: ev.clientY, on: false, node: n, bad: descendants(n.dataset.id), px: ev.clientX, py: ev.clientY }; drag.bad.add(n.dataset.id);
+    ev.preventDefault();                                          // stops text selection / the browser's own image drag from cancelling ours
+    if (ev.pointerType !== "mouse") n.setPointerCapture?.(ev.pointerId);
+  };
+  el.ondragstart = (ev) => ev.preventDefault();
+  // keep scrolling while the pointer is held near an edge, so far-away managers can be reached
+  const autoscroll = () => {
+    if (!drag || !drag.on) return;
+    const tree = el.querySelector(".otree"), r = tree ? tree.getBoundingClientRect() : null, E = 70, S = 18;
+    if (drag.py < E) window.scrollBy(0, -S); else if (drag.py > innerHeight - E - (innerWidth < 900 ? 70 : 0)) window.scrollBy(0, S);
+    if (r && drag.py >= r.top && drag.py <= r.bottom) { if (drag.px < r.left + E) tree.scrollLeft -= S; else if (drag.px > r.right - E) tree.scrollLeft += S; }
+    requestAnimationFrame(autoscroll);
   };
   on("pointermove", (ev) => {
     if (!drag || !el.isConnected) return;
     if (!drag.on) { if (Math.hypot(ev.clientX - drag.x, ev.clientY - drag.y) < 7) return; drag.on = true;
       drag.ghost = drag.node.cloneNode(true); drag.ghost.classList.add("ghost"); document.body.appendChild(drag.ghost); drag.node.classList.add("dragging"); }
+    drag.px = ev.clientX; drag.py = ev.clientY;
+    if (!drag.scrolling) { drag.scrolling = true; requestAnimationFrame(autoscroll); }
     drag.ghost.style.left = ev.clientX + 8 + "px"; drag.ghost.style.top = ev.clientY + 8 + "px";
     clear(); const t = targetAt(ev.clientX, ev.clientY);
     if (t) t.classList.add(t.dataset.top ? "dropok" : drag.bad.has(t.dataset.id) ? "dropbad" : "dropok");

@@ -26,24 +26,23 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
   const groups = {}; shown.forEach((p) => (groups[p.dept_name || "No department"] ||= []).push(p));
   const active = dir.filter((p) => p.status === "active").length;
 
-  const personCard = (p) => `<div class="card person" data-id="${esc(p.id)}">
-      <div class="between"><div><b>${esc(p.full_name)}</b>${p.has_login ? ` <span class="chip ok">has login</span>` : ""}<br>
-        <small>${esc(p.role_title || "No job title")}${p.role_level ? ` · level ${p.role_level}` : ""} · hired ${esc(fmtD(p.hire_date))}</small></div>
-        <span class="chip ${p.status === "active" ? "ok" : "mute"}">${esc(p.status)}</span></div>
+  const personCard = (p) => `<div class="card person prow" data-id="${esc(p.id)}">
+      <div class="between"><div class="pmain"><b>${esc(p.full_name)}</b>${p.has_login ? ` <span class="chip ok">login</span>` : ""}${p.status === "active" ? "" : ` <span class="chip mute">${esc(p.status)}</span>`}<br>
+        <small>${esc(p.role_title || "No job title")}${p.role_level ? ` · L${p.role_level}` : ""} · hired ${esc(fmtD(p.hire_date))}</small></div>
+        <div class="pact"><button class="link" data-edit>Edit</button><button class="link" data-addpos>+ Position</button></div></div>
       ${extrasOf(p.id).map((x) => `<div class="between xpos"><small>➕ <b>${esc(x.company_code)}</b> · ${esc(x.dept_name)} · ${esc(x.role_title)}${x.note ? ` — ${esc(x.note)}` : ""}</small><button class="link" data-delpos="${esc(x.position_id)}">Remove</button></div>`).join("")}
-      <button class="link" data-edit>Edit</button> <button class="link" data-addpos>+ Another position</button>
-      <form class="form" data-eform hidden>${personFields(p)}<div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Save</button></div></form>
-      <form class="form" data-pform hidden><p class="s">Main position: <b>${esc(cur.short_code)}</b> · ${esc(p.dept_name || "—")} · ${esc(p.role_title || "—")}. Leave and the login always stay with the main company. This adds a second department or company.</p>
+      <form class="form egrid" data-eform hidden>${personFields(p)}<div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-closeform>Close</button></div></form>
+      <form class="form egrid" data-pform hidden><p class="s">Main position: <b>${esc(cur.short_code)}</b> · ${esc(p.dept_name || "—")} · ${esc(p.role_title || "—")}. Leave and the login stay with the main company; this adds a second department or company.</p>
         <label>Company<select name="pco">${companies.map((c) => `<option value="${esc(c.id)}">${esc(c.short_code)}</option>`).join("")}</select></label>
-        <div data-pbody><small>Loading…</small></div><div class="eerr"></div>
-        <div class="btns"><button class="btn primary" type="submit">Add position</button></div></form></div>`;
+        <div data-pbody class="egrid"><small>Loading…</small></div><div class="eerr"></div>
+        <div class="btns"><button class="btn primary" type="submit">Add position</button><button class="btn" type="button" data-closeform>Close</button></div></form></div>`;
   function personFields(p) {
     p = p || {};
     return `<label>Full name<input name="name" required maxlength="80" value="${esc(p.full_name || "")}"></label>
-      <div class="two"><label>Department<select name="dept">${opt(lk.departments, "id", (d) => d.name, p.dept_id, "— none —")}</select></label>
-        <label>Job title<select name="role">${opt(lk.roles, "id", roleLabel, p.role_id, "— none —")}</select></label></div>
-      <div class="two"><label>Hire date<input name="hire" type="date" value="${esc(p.hire_date || "")}"></label>
-        <label>Employee no. <span class="opt">(optional)</span><input name="no" maxlength="30" value="${esc(p.employee_no || "")}"></label></div>
+      <label>Department<select name="dept">${opt(lk.departments, "id", (d) => d.name, p.dept_id, "— none —")}</select></label>
+        <label>Job title<select name="role">${opt(lk.roles, "id", roleLabel, p.role_id, "— none —")}</select></label>
+      <label>Hire date<input name="hire" type="date" value="${esc(p.hire_date || "")}"></label>
+        <label>Employee no. <span class="opt">(optional)</span><input name="no" maxlength="30" value="${esc(p.employee_no || "")}"></label>
       <label>Status<select name="status">${STATUS.map((s) => `<option${s === (p.status || "active") ? " selected" : ""}>${s}</option>`).join("")}</select></label>
       <input type="hidden" name="rep" value="${esc(p.reports_to_id || "")}">`;
   }
@@ -58,7 +57,7 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
     <div id="addbox" hidden><form class="card form" id="addemp">${personFields(null)}<div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Add person</button><button class="btn" type="button" data-canceladd>Cancel</button></div></form></div>
     <input class="search" id="empq" type="search" placeholder="Search name, job title or department" value="${esc(state.empQuery || "")}">
     ${visitors.length ? `<details class="grp" open><summary><b>Also works here (main job elsewhere)</b> <span class="chip mute">${visitors.length}</span></summary>${visitors.map((x) => `<div class="card vperson"><div class="between"><div><b>${esc(x.full_name)}</b> <span class="chip mute">main: ${esc(x.home_code)}</span><br><small>${esc(x.role_title)} · ${esc(x.dept_name)}${x.note ? ` — ${esc(x.note)}` : ""}</small></div><button class="link" data-delpos="${esc(x.position_id)}">Remove</button></div></div>`).join("")}</details>` : ""}
-    <div class="list">${Object.keys(groups).sort().map((g) => `<details class="grp" ${q || Object.keys(groups).length < 4 ? "open" : ""}><summary><b>${esc(g)}</b> <span class="chip mute">${groups[g].length}</span></summary>${groups[g].map(personCard).join("")}</details>`).join("") || `<div class="empty">No people yet. Upload a file above or add someone.</div>`}</div>
+    <div class="list">${Object.keys(groups).sort().map((g) => `<details class="grp" ${q || Object.keys(groups).length < 4 ? "open" : ""}><summary><b>${esc(g)}</b> <span class="chip mute">${groups[g].length}</span></summary><div class="gl">${groups[g].map(personCard).join("")}</div></details>`).join("") || `<div class="empty">No people yet. Upload a file above or add someone.</div>`}</div>
     <h2>Job titles${canLevels ? " &amp; levels" : ""}</h2>
     <div class="card"><b>Add a job title</b><p class="s">Needed before you can give someone that title. The level decides what the title can do (1 Staff · 2 Supervisor · 3 Manager · 4 Director/Head · 5 MD). Adding a title that already exists changes nothing.</p>
       <form class="form" id="addrole"><div class="two"><label>Job title<input name="title" required maxlength="80"></label>
@@ -82,15 +81,17 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
     if (ev.target.closest("[data-canceladd]")) { el.querySelector("#addbox").hidden = true; return; }
     const dp = ev.target.closest("[data-delpos]"); if (dp) { if (!confirm("Remove this additional position?")) return; return guard(dp, null, () => rpc("iaf_position_delete", { p_id: dp.dataset.delpos }), "Position removed ✔"); }
     const c = ev.target.closest(".person"); if (!c) return;
-    if (ev.target.closest("[data-edit]")) { const f = c.querySelector("[data-eform]"); f.hidden = !f.hidden; }
-    if (ev.target.closest("[data-addpos]")) { const f = c.querySelector("[data-pform]"); f.hidden = !f.hidden; if (!f.hidden) loadPosBody(f, f.pco.value); }
+    const sync = () => c.classList.toggle("open", !c.querySelector("[data-eform]").hidden || !c.querySelector("[data-pform]").hidden);
+    if (ev.target.closest("[data-closeform]")) { c.querySelector("[data-eform]").hidden = true; c.querySelector("[data-pform]").hidden = true; return sync(); }
+    if (ev.target.closest("[data-edit]")) { const f = c.querySelector("[data-eform]"); f.hidden = !f.hidden; c.querySelector("[data-pform]").hidden = true; sync(); }
+    if (ev.target.closest("[data-addpos]")) { const f = c.querySelector("[data-pform]"); f.hidden = !f.hidden; c.querySelector("[data-eform]").hidden = true; sync(); if (!f.hidden) loadPosBody(f, f.pco.value); }
   };
   async function loadPosBody(f, coId) {
     const body = f.querySelector("[data-pbody]"); body.innerHTML = "<small>Loading…</small>";
     try {
       if (!xcache[coId]) { const [l, ppl] = await Promise.all([rpc("iaf_org_lookups", { p_company: coId }), rpc("iaf_company_people", { p_company: coId }).catch(() => [])]); xcache[coId] = { l, ppl }; }
       const { l, ppl } = xcache[coId], pid = f.closest(".person").dataset.id;
-      body.innerHTML = `<div class="two"><label>Department<select name="pdept">${opt(l.departments, "id", (d) => d.name, "", "— choose —")}</select></label>
+      body.innerHTML = `<label>Department<select name="pdept">${opt(l.departments, "id", (d) => d.name, "", "— choose —")}</select></label>
         <label>Job title<select name="prole">${opt(l.roles, "id", roleLabel, "", "— choose —")}</select></label></div>
         <label>Reports to <span class="opt">(optional)</span><select name="prep">${opt(ppl.filter((x) => x.id !== pid), "id", (x) => `${x.full_name} (${x.home_code})`, "", "— nobody / set later in Org chart —")}</select></label>
         <label>Main responsibility there <span class="opt">(optional)</span><input name="pnote" maxlength="120" placeholder="e.g. Oversees plant maintenance"></label>`;
