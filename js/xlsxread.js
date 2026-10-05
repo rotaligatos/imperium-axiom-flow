@@ -118,6 +118,57 @@ const isoDate = (v) => { if (v == null || v === "") return null; if (typeof v ==
   const d = new Date(s); return Number.isNaN(+d) ? null : d.toISOString().slice(0, 10); };
 const text = (v) => (v == null ? "" : String(v).trim());
 
+
+// ---------------------------------------------------------------------------------------------
+// 201 file columns: one list drives the template, the export and the upload mapping.
+// kind: text | date | time | bool | enum | num | gov
+// ---------------------------------------------------------------------------------------------
+export const COLS201 = [
+  { key: "middle_name", header: "Middle Name", re: /^middle/, kind: "text" },
+  { key: "status", header: "Status", re: /^status$/, kind: "enum", ex: ["active", "active"] },
+  { key: "sex", header: "Sex", re: /^(sex|gender)$/, kind: "enum", ex: ["male", "female"] },
+  { key: "birth_date", header: "Birth Date", re: /^(birth ?date|date of birth|birthday|dob)/, kind: "date", ex: ["1990-04-12", "1994-11-02"] },
+  { key: "civil_status", header: "Civil Status", re: /^civil status/, kind: "enum", ex: ["married", "single"] },
+  { key: "mobile", header: "Mobile", re: /^(mobile|cellphone|cell no|contact no|contact number)/, kind: "text", ex: ["09171234567", ""] },
+  { key: "personal_email", header: "Personal Email", re: /^(personal e-?mail|e-?mail( address)?)$/, kind: "text" },
+  { key: "present_address", header: "Present Address", re: /^(present|current) address/, kind: "text" },
+  { key: "permanent_address", header: "Permanent Address", re: /^(permanent|home) address/, kind: "text" },
+  { key: "emergency_name", header: "Emergency Contact", re: /^emergency (contact( name)?|name)$/, kind: "text" },
+  { key: "emergency_relation", header: "Emergency Relationship", re: /^emergency (contact )?relation/, kind: "text" },
+  { key: "emergency_mobile", header: "Emergency Mobile", re: /^emergency (contact )?(mobile|number|phone|no)/, kind: "text" },
+  { key: "employment_type", header: "Employment Type", re: /^(employment|employee) type/, kind: "enum", ex: ["regular", "probationary"] },
+  { key: "regularization_date", header: "Regularization Date", re: /^regularization/, kind: "date" },
+  { key: "shift_start", header: "Shift Start", re: /^shift start/, kind: "time", ex: ["08:00", "07:00"] },
+  { key: "shift_end", header: "Shift End", re: /^shift end/, kind: "time", ex: ["17:00", "18:00"] },
+  { key: "daily_hours", header: "Daily Hours", re: /^(daily|work) hours|^hours per day/, kind: "num", ex: ["8", "9"] },
+  { key: "company_email", header: "Company Email", re: /^(company|work) e-?mail/, kind: "text" },
+  { key: "sss", header: "SSS No", re: /^sss/, kind: "gov" },
+  { key: "philhealth", header: "PhilHealth No", re: /^phil ?health/, kind: "gov" },
+  { key: "pagibig", header: "Pag-IBIG No", re: /^(pag-?ibig|hdmf)/, kind: "gov" },
+  { key: "tin", header: "TIN", re: /^tin/, kind: "gov" },
+  { key: "spouse_name", header: "Spouse Name", re: /^spouse/, kind: "text" },
+  { key: "marriage_cert_on_file", header: "Marriage Cert On File", re: /^marriage cert/, kind: "bool", ex: ["yes", ""] },
+  { key: "solo_parent", header: "Solo Parent", re: /^solo parent$/, kind: "bool", ex: ["no", "yes"] },
+  { key: "spic_no", header: "SPIC No", re: /^(spic (no|number)|solo parent (id|card))/, kind: "text" },
+  { key: "spic_valid_until", header: "SPIC Valid Until", re: /^(spic valid|solo parent (id|card) valid)/, kind: "date" },
+  { key: "solo_verified", header: "Solo Parent Verified By HR", re: /^solo parent verified/, kind: "bool" },
+  { key: "prior_paternity_count", header: "Prior Paternity Count", re: /^prior paternity/, kind: "num", ex: ["1", ""] },
+  { key: "edu_attainment", header: "Education", re: /^(education|educational attainment)/, kind: "text" },
+  { key: "edu_course", header: "Course", re: /^course/, kind: "text" },
+  { key: "separation_date", header: "Separation Date", re: /^(separation date|date separated)/, kind: "date" },
+  { key: "last_day_worked", header: "Last Day Worked", re: /^last day/, kind: "date" },
+  { key: "separation_type", header: "Separation Type", re: /^separation type/, kind: "enum" },
+  { key: "separation_reason", header: "Separation Reason", re: /^(separation )?reason/, kind: "text" },
+  { key: "clearance_done", header: "Clearance Done", re: /^clearance/, kind: "bool" },
+  { key: "final_pay_released", header: "Final Pay Released", re: /^final pay/, kind: "bool" },
+  { key: "rehire_eligible", header: "Rehire Eligible", re: /^(eligible for )?rehire/, kind: "bool" },
+];
+const timeStr = (v) => { if (v == null || v === "") return null; if (typeof v === "number") { if (v > 0 && v < 1) { const m = Math.round(v * 1440); return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; } return String(v); } return String(v).trim() || null; };
+const cell201 = (c, v) => { if (v == null || v === "") return null;
+  if (c.kind === "date") return isoDate(v); if (c.kind === "time") return timeStr(v);
+  if (typeof v === "number") { if (c.key.endsWith("mobile") || c.key === "mobile") { const s = String(Math.trunc(v)); return /^9\d{9}$/.test(s) ? "0" + s : s; } return String(v); }
+  return text(v) || null; };
+
 export function mapEmployeeRows(grid) {
   let hi = -1;
   for (let i = 0; i < Math.min(grid.length, 15); i++) {
@@ -136,6 +187,8 @@ export function mapEmployeeRows(grid) {
   col.merit = find(/^merit/); col.newBasic = find(/^new basic/);
   col.newAllow = col.newBasic >= 0 ? find(/^allowance/, col.newBasic) : -1;
   col.newPos = find(/new position/); col.remarks = find(/^remarks/);
+  const c201 = COLS201.map((c) => [c, find(c.re)]);
+  for (const [c, idx] of c201) col[c.key] = idx;
   const dataStart = hi + 1 + (h2.some((x) => /^(monthly|annual|%|amount)/.test(x)) ? 1 : 0);
   const rows = [];
   for (let i = dataStart; i < grid.length; i++) {
@@ -145,6 +198,7 @@ export function mapEmployeeRows(grid) {
       basic: num(g(col.basic)), allowance: num(g(col.allow)), last_increase_date: isoDate(g(col.lastInc)), last_promotion_date: isoDate(g(col.lastPromo)),
       increase_type: text(g(col.incType)) || null, merit_pct: num(g(col.merit)), new_basic: num(g(col.newBasic)), new_allowance: num(g(col.newAllow)),
       new_position: text(g(col.newPos)) || null, remarks: text(g(col.remarks)) || null });
+    for (const [c, idx] of c201) { if (idx < 0) continue; const v = cell201(c, r[idx]); if (v != null) rows[rows.length - 1][c.key] = v; }
   }
   return { rows, found: Object.fromEntries(Object.entries(col).map(([k, v]) => [k, v >= 0])) };
 }
@@ -156,4 +210,23 @@ export function suggestDeptMap(counts) {
   const names = Object.keys(counts).sort((a, b) => counts[b] - counts[a]), map = {};
   for (const n of names) { const better = names.find((m) => m !== n && counts[m] > counts[n] && n.length > 4 && lev(n.toLowerCase(), m.toLowerCase()) <= 2); if (better) map[n] = better; }
   return map;
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// Children / deliveries sheet: Employee No, Name, Child Name, Date, Type, Birth Cert On File
+// ---------------------------------------------------------------------------------------------
+export function mapChildrenRows(grid) {
+  let hi = -1;
+  for (let i = 0; i < Math.min(grid.length, 15); i++) { const h = (grid[i] || []).map(norm); if (h.some((x) => /^child/.test(x)) && h.some((x) => /date/.test(x))) { hi = i; break; } }
+  if (hi < 0) throw new Error('Could not find the header row. The sheet needs columns "Child Name" and "Birth / Miscarriage Date".');
+  const h = (grid[hi] || []).map(norm), at = (re) => h.findIndex((x) => re.test(x));
+  const c = { no: at(/^employee (no|number)|^emp no/), name: at(/^(name|employee name|full name)$/), child: at(/^child/), date: at(/date/), type: at(/^type/), cert: at(/cert/) };
+  const rows = [];
+  for (let i = hi + 1; i < grid.length; i++) {
+    const r = grid[i] || [], g = (k) => (k >= 0 ? r[k] : null);
+    if (!text(g(c.no)) && !text(g(c.name))) continue;
+    rows.push({ employee_no: text(g(c.no)) || null, name: text(g(c.name)), child_name: text(g(c.child)) || null, event_date: isoDate(g(c.date)), event_type: text(g(c.type)) || null, birth_cert_on_file: text(g(c.cert)) || null });
+  }
+  return rows;
 }

@@ -135,3 +135,7 @@ fieldset.cos{border:1px solid #d8dee9;border-radius:10px;padding:8px 12px;margin
 .onode .apv{position:absolute;top:4px;right:20px;background:#16a34a;color:#fff;border-radius:999px;font-size:11px;line-height:16px;width:16px;text-align:center}.apvrow{margin:6px 0}
 label.tick{display:inline-flex!important;flex-direction:row;align-items:center;gap:6px;font-weight:600}label.tick input{width:auto;min-width:0;min-height:0;margin:0}
 .mirrors{margin:6px 0 2px}.drow .pact{display:inline-flex;gap:14px;flex-wrap:wrap}.drow .between{align-items:flex-start;gap:8px}
+/* 201 file */
+.p201box{grid-column:1/-1;margin-top:8px;border-top:1px solid var(--line);padding-top:6px}.p201box h4{margin:14px 0 2px;font-size:.9rem}.p201box h4 small{font-weight:400;color:var(--mute)}
+.p201box .egrid .s{align-self:end}.p201box .kid{padding:5px 0;border-bottom:1px solid var(--line);font-size:.9rem}label.tick input{width:auto}
+.filt{gap:8px;align-items:center}.filt .search{flex:1;margin:0}.filt select{width:auto;max-width:48%}.chglist{margin:8px 0;font-size:.9rem}.chglist summary{cursor:pointer;font-weight:600}
