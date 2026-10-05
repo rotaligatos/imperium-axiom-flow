@@ -35,10 +35,10 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
   const personCard = (p) => `<div class="card person prow" data-id="${esc(p.id)}">
       <div class="between"><div class="pmain"><b>${esc(p.full_name)}</b>${p.has_login ? ` <span class="chip ok">login</span>` : ""}${p.status === "active" ? "" : ` <span class="chip mute">${esc(p.status)}</span>`}<br>
         <small>${esc(p.role_title || "No job title")}${rankOf[p.role_id] ? ` · ${esc(RANKS[rankOf[p.role_id]])}` : ""} · hired ${esc(fmtD(p.hire_date))}</small></div>
-        <div class="pact"><button class="link" data-edit>Edit</button><button class="link" data-p201btn>201 file</button><button class="link" data-addpos>+ Position</button></div></div>
+        <div class="pact"><button class="link" data-edit>Edit</button><button class="link only-desktop" data-p201btn>201 file</button><button class="link" data-addpos>+ Position</button></div></div>
       ${p.role_id && companies.length > 1 ? `<div class="mirrors"><small>Same position in:</small> ${companies.filter((c) => c.id !== cur.id).map((c) => `<label class="tick"><input type="checkbox" data-mirror="${esc(c.id)}"${extrasOf(p.id).some((x) => x.company_id === c.id) ? " checked" : ""}> ${esc(c.short_code)}</label>`).join(" ")}</div>` : ""}
       ${extrasOf(p.id).map((x) => `<div class="between xpos"><small>➕ <b>${esc(x.company_code)}</b> · ${esc(x.dept_name || "no department")} · ${esc(x.role_title)}${x.note ? ` — ${esc(x.note)}` : ""}</small><button class="link" data-delpos="${esc(x.position_id)}">Remove</button></div>`).join("")}
-      <div class="p201box" data-p201 hidden></div>
+      <div class="p201box only-desktop" data-p201 hidden></div>
       <form class="form egrid" data-eform hidden>${personFields(p)}<div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-closeform>Close</button></div></form>
       <form class="form egrid" data-pform hidden><p class="s">Main position: <b>${esc(cur.short_code)}</b> · ${esc(p.dept_name || "—")} · ${esc(p.role_title || "—")}. Leave and the login stay with the main company; this adds a second department or company.</p>
         <label>Company<select name="pco">${companies.map((c) => `<option value="${esc(c.id)}">${esc(c.short_code)}</option>`).join("")}</select></label>
@@ -59,10 +59,11 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
   el.innerHTML = `
     <div class="cotabs">${companies.map((c) => `<button class="cotab${c.id === cur.id ? " on" : ""}" data-co="${esc(c.id)}">${esc(c.short_code)}</button>`).join("")}</div>
     <p class="s"><b>${esc(cur.name)}</b> · ${active} active · ${sepCount} separated · ${dir.length} people in all</p>
-    <div class="card"><div class="between"><b>Upload employee 201 list</b><span class="pact"><button class="link" data-tpl>Blank template</button><button class="link" data-export>Export current 201</button></span></div>
+    <p class="s only-mobile">The 201 file, uploads and exports are available on a computer.</p>
+    <div class="card only-desktop"><div class="between"><b>Upload employee 201 list</b><span class="pact"><button class="link" data-tpl>Blank template</button><button class="link" data-export>Export current 201</button></span></div>
       <p class="s">One sheet for everyone: name, job, department, hire date, <b>status (active / separated)</b> and all 201 details. Upload an Excel (.xlsx) or CSV file. You will see a preview first — nothing is saved until you confirm. A <b>blank cell never erases</b> what is already saved. People already in the list are matched by Employee No, then by name; anyone else is added. Salary columns and government numbers are stored for HR staff only.</p>
       <input type="file" id="empfile" accept=".xlsx,.csv" hidden><button class="btn block" data-pick>Choose Excel / CSV file…</button><div id="imp"></div></div>
-    <details class="card grp" id="kidbox"><summary><b>Children &amp; deliveries upload</b> <span class="chip mute">for Paternity / Maternity</span></summary>
+    <details class="card grp only-desktop" id="kidbox"><summary><b>Children &amp; deliveries upload</b> <span class="chip mute">for Paternity / Maternity</span></summary>
       <p class="s">Optional second sheet: one row per child (or miscarriage) with the date. Upload the main 201 sheet first so the people exist.</p>
       <div class="between"><span class="pact"><button class="link" data-ktpl>Blank template</button><button class="link" data-kexport>Export current</button></span></div>
       <input type="file" id="kidfile" accept=".xlsx,.csv" hidden><button class="btn block" data-kpick>Choose Excel / CSV file…</button><div id="kidimp"></div></details>

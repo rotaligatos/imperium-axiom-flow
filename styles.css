@@ -146,3 +146,7 @@ label.tick{display:inline-flex!important;flex-direction:row;align-items:center;g
 .p201box .btn{padding:7px 14px;min-height:0}label.tick input{width:auto;height:auto}
 @media(max-width:600px){.p201box .egrid{grid-template-columns:repeat(2,minmax(0,1fr))}.p201box .egrid .wide{grid-column:1/-1}}
 .filt{gap:8px;align-items:center}.filt .search{flex:1;margin:0}.filt select{width:auto;max-width:48%}.chglist{margin:8px 0;font-size:.9rem}.chglist summary{cursor:pointer;font-weight:600}
+
+/* the 201 file is a desktop job: hidden on phones and small tablets */
+.only-mobile{display:none}
+@media(max-width:859px){.only-desktop{display:none!important}.only-mobile{display:block}}
