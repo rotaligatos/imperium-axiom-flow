@@ -23,8 +23,17 @@ function copy(p, ox, oy, d) {
   const sig = (s, cx, lineY, w) => {            // signature stamp centred above a line
     hl(cx - w / 2, cx + w / 2, lineY);
     if (!s) return;
+    const stamp = `Signed with device ${s.method || "biometric/PIN"} - ${fmtWhen(s.when)}`;
+    if (s.img) {                                  // drawn signature image + small name/verification text
+      const ih = 19, iw = Math.min(w * 0.5, ih * (s.img.w / s.img.h));
+      p.image(s.img, X(cx - w / 2 + 2), Y(lineY - ih - 0.5), iw, ih);
+      const tx = cx - w / 2 + iw + 6;
+      t(p.fit(s.name, 7, true, w - iw - 8), tx, lineY - 9, { size: 7, bold: true });
+      t(p.fit(stamp, 4.6, false, w - iw - 8), tx, lineY - 3.5, { size: 4.6, rgb: [60, 60, 60] });
+      return;
+    }
     t(p.fit(s.name, 8, true, w), cx, lineY - 11, { size: 8, bold: true, align: "center" });
-    t(p.fit(`Signed with device ${s.method || "biometric/PIN"} - ${fmtWhen(s.when)}`, 5.2, false, w + 30), cx, lineY - 4.2, { size: 5.2, align: "center", rgb: [60, 60, 60] });
+    t(p.fit(stamp, 5.2, false, w + 30), cx, lineY - 4.2, { size: 5.2, align: "center", rgb: [60, 60, 60] });
   };
 
   // Outer frame + header

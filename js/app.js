@@ -1,4 +1,5 @@
 import { buildAtrfPdf, fmtDate } from "./atrf.js";
+import { mountPad, pngToPdfImage } from "./sigpad.js";
 import { sign, registerDevice, myDevices, canSign } from "./sign.js";
 import { isConfigured, getSession, userId, signIn, signOut, rest, rpc } from "./api.js";
 
@@ -94,10 +95,11 @@ async function viewHome(tok) {
   shell("home", `Hello, ${(state.me.full_name || "").split(" ")[0]}`, loading());
   const el = document.querySelector(".content");
   try {
-    const [bal, reqs, devs] = await Promise.all([
+    const [bal, reqs, devs, myImg] = await Promise.all([
       rest(`vw_leave_balances_live?user_id=eq.${userId()}&year=eq.${YEAR}&select=leave_type_code,total_allotment,used,remaining`),
       rest(`leave_requests?requester_id=eq.${userId()}&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name)&order=created_at.desc&limit=5`),
-      myDevices().catch(() => []) ]);
+      myDevices().catch(() => []),
+      rest(`iaf_signature_images?user_id=eq.${userId()}&select=png_base64`).catch(() => []) ]);
     if (tok !== navToken) return;
     const cards = ["VL", "SL"].map((c) => {
       const b = bal.find((x) => x.leave_type_code === c);
@@ -112,11 +114,18 @@ async function viewHome(tok) {
       ${state.pending ? `<a class="notice" href="#/approvals"><b>${state.pending}</b> request${state.pending > 1 ? "s" : ""} waiting for your decision →</a>` : ""}
       <h2>Recent requests</h2><div class="list">${recent}</div>
       ${reqs.length ? `<a class="link" href="#/requests">See all →</a>` : ""}
-      <div class="card"><h3>My signature</h3><p class="s">${devs.length ? `✔ ${devs.length} device${devs.length > 1 ? "s" : ""} set up (${esc(devs.map((d) => d.label || "Device").join(", "))}). You sign with your fingerprint, face or device PIN.`
-        : "Not set up yet. You'll be asked the first time you file or approve — or set it up now."}</p>
-        <button class="btn block" data-act="reg-device">Set up this device</button></div>`;
-    el.querySelector("[data-act=reg-device]").onclick = async (ev) => { const b = ev.currentTarget; b.disabled = true;
-      try { await registerDevice(state.me?.full_name); toast("This device is set up ✔"); route(); } catch (e) { toast(e.message || "Could not set up this device", true); b.disabled = false; } };
+      <div class="card"><h3>My signature</h3>
+        <p class="s">${devs.length ? `✔ Device set up (${esc(devs.map((d) => d.label || "Device").join(", "))}). You sign with your fingerprint, face or device PIN.`
+          : "Step 1 — set up this device so your fingerprint, face or PIN can be your signature."}</p>
+        ${devs.length ? `<button class="link" data-act="reg-device">Add another device</button>` : `<button class="btn block" data-act="reg-device">Set up this device</button>`}
+        <p class="s" style="margin-top:14px">${myImg[0] ? "✔ Your drawn signature (shown on the printed form):" : "Step 2 — draw your signature. It appears on your leave forms once you file or approve."}</p>
+        ${myImg[0] ? `<div class="sigprev"><img alt="Your signature" src="data:image/png;base64,${esc(myImg[0].png_base64)}"></div>` : ""}
+        <div id="padhost"></div>
+        <button class="btn block" data-act="draw-sig">${myImg[0] ? "Change signature" : "Draw my signature"}</button></div>`;
+    el.querySelectorAll("[data-act=reg-device]").forEach((rb) => (rb.onclick = async (ev) => { const b = ev.currentTarget; b.disabled = true;
+      try { await registerDevice(state.me?.full_name); toast("This device is set up ✔"); route(); } catch (e) { toast(e.message || "Could not set up this device", true); b.disabled = false; } }));
+    el.querySelector("[data-act=draw-sig]").onclick = (ev) => { ev.currentTarget.hidden = true;
+      mountPad(el.querySelector("#padhost"), { onCancel: () => route(), onSave: async (png) => { await rpc("iaf_signature_image_save", { p_png_base64: png }); toast("Signature saved ✔"); route(); } }); };
   } catch (e) { el.innerHTML = errBox(e); }
 }
 
@@ -336,8 +345,12 @@ async function downloadForm(r, apps, btn) {
     const [u, bal, sigs] = await Promise.all([
       safe(`users?id=eq.${encodeURIComponent(r.requester_id)}&select=full_name,roles(title),departments(name),companies(name,short_code)`),
       safe(`vw_leave_balances_live?user_id=eq.${encodeURIComponent(r.requester_id)}&year=eq.${YEAR}&select=leave_type_code,remaining`),
-      safe(`iaf_signatures?leave_request_id=eq.${encodeURIComponent(r.id)}&select=purpose,created_at,signer:users!user_id(full_name)&order=created_at`) ]);
-    const lastSig = (ps) => { const x = sigs.filter((g) => ps.includes(g.purpose)).slice(-1)[0]; return x ? { name: x.signer?.full_name || "", when: x.created_at, method: "biometric/PIN" } : null; };
+      safe(`iaf_signatures?leave_request_id=eq.${encodeURIComponent(r.id)}&select=purpose,created_at,user_id,signer:users!user_id(full_name)&order=created_at`) ]);
+    const imgs = {};
+    for (const uid of [...new Set(sigs.map((g) => g.user_id))]) {
+      try { const row = (await safe(`iaf_signature_images?user_id=eq.${encodeURIComponent(uid)}&select=png_base64`))[0]; if (row) imgs[uid] = await pngToPdfImage(row.png_base64); } catch { /* the form is still produced without the drawn image */ }
+    }
+    const lastSig = (ps) => { const x = sigs.filter((g) => ps.includes(g.purpose)).slice(-1)[0]; return x ? { name: x.signer?.full_name || "", when: x.created_at, method: "biometric/PIN", img: imgs[x.user_id] || null } : null; };
     const emp = u[0] || {}, code = r.leave_types?.code;
     const left = (c) => { const b = bal.find((x) => x.leave_type_code === c); return b ? num(b.remaining) : null; };
     const final = apps.filter((a) => a.action === "APPROVED" || a.action === "REJECTED").slice(-1)[0];

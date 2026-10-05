@@ -84,8 +84,8 @@ export class Pdf {
     obj(5, `<< /Title (${esc(clean(info.title || "Document"))}) /Producer (Imperium Axiom Flow) >>`);
     this.imgs.forEach((im, i) => {
       const id = imgBase + i * 2;
-      obj(id, `<< /Type /XObject /Subtype /Image /Width ${im.w} /Height ${im.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /SMask ${id + 1} 0 R /Length ${im.rgb.length} >>`, im.rgb);
-      obj(id + 1, `<< /Type /XObject /Subtype /Image /Width ${im.w} /Height ${im.h} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length ${im.a.length} >>`, im.a);
+      obj(id, `<< /Type /XObject /Subtype /Image /Width ${im.w} /Height ${im.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 ${im.flate === false ? "" : "/Filter /FlateDecode"} /SMask ${id + 1} 0 R /Length ${im.rgb.length} >>`, im.rgb);
+      obj(id + 1, `<< /Type /XObject /Subtype /Image /Width ${im.w} /Height ${im.h} /ColorSpace /DeviceGray /BitsPerComponent 8 ${im.flate === false ? "" : "/Filter /FlateDecode"} /Length ${im.a.length} >>`, im.a);
     });
     const xo = this.imgs.map((_, i) => `/Im${i} ${imgBase + i * 2} 0 R`).join(" ");
     this.pages.forEach((content, i) => {
