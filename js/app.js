@@ -383,7 +383,7 @@ async function bootSignedIn() {
   await refreshBadge(); route();
 }
 async function start() {
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
   if (getSession()) await bootSignedIn(); else viewLogin();
   const tick = () => getSession() && state.me && refreshBadge();
   setInterval(tick, 60000); document.addEventListener("visibilitychange", () => !document.hidden && tick());
