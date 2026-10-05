@@ -10,7 +10,7 @@ const n = (x) => (Math.round(x * 100) / 100).toString();
 const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 export class Pdf {
-  constructor(w, h) { this.w = w; this.h = h; this.pages = []; this.imgs = []; this.ops = []; }
+  constructor(w, h) { this.k = 1; this.w = w; this.h = h; this.pages = []; this.imgs = []; this.ops = []; }
   // ---- measuring -----------------------------------------------------------------------
   width(str, size, bold) {
     const t = bold ? W_HB : W_H; let w = 0;
@@ -34,22 +34,22 @@ export class Pdf {
     if (cur) lines.push(cur); return lines;
   }
   // ---- drawing -------------------------------------------------------------------------
-  _y(y) { return this.h - y; }
+  _y(y) { return this.h - y * this.k; }
   color(rgb, stroke) { const [r, g, b] = rgb.map((v) => n(v / 255)); this.ops.push(`${r} ${g} ${b} ${stroke ? "RG" : "rg"}`); }
   line(x1, y1, x2, y2, lw = 0.6, rgb = [0, 0, 0]) {
-    this.ops.push("q"); this.color(rgb, true); this.ops.push(`${n(lw)} w ${n(x1)} ${n(this._y(y1))} m ${n(x2)} ${n(this._y(y2))} l S Q`);
+    this.ops.push("q"); this.color(rgb, true); this.ops.push(`${n(lw * this.k)} w ${n(x1 * this.k)} ${n(this._y(y1))} m ${n(x2 * this.k)} ${n(this._y(y2))} l S Q`);
   }
   rect(x, y, w, h, { fill, stroke = [0, 0, 0], lw = 0.6 } = {}) {
     this.ops.push("q");
     if (fill) this.color(fill, false);
     if (stroke) this.color(stroke, true);
-    this.ops.push(`${n(lw)} w ${n(x)} ${n(this._y(y + h))} ${n(w)} ${n(h)} re ${fill && stroke ? "B" : fill ? "f" : "S"} Q`);
+    this.ops.push(`${n(lw * this.k)} w ${n(x * this.k)} ${n(this._y(y + h))} ${n(w * this.k)} ${n(h * this.k)} re ${fill && stroke ? "B" : fill ? "f" : "S"} Q`);
   }
   text(str, x, y, { size = 8, bold = false, align = "left", rgb = [0, 0, 0] } = {}) {
     str = clean(str); if (!str) return;
     const w = this.width(str, size, bold);
     if (align === "center") x -= w / 2; else if (align === "right") x -= w;
-    this.ops.push(`q ${rgb.map((v) => n(v / 255)).join(" ")} rg BT /${bold ? "F2" : "F1"} ${n(size)} Tf ${n(x)} ${n(this._y(y))} Td (${esc(str)}) Tj ET Q`);
+    this.ops.push(`q ${rgb.map((v) => n(v / 255)).join(" ")} rg BT /${bold ? "F2" : "F1"} ${n(size * this.k)} Tf ${n(x * this.k)} ${n(this._y(y))} Td (${esc(str)}) Tj ET Q`);
   }
   check(x, y, size, on) {          // checkbox, top-left at (x,y)
     this.rect(x, y, size, size, { lw: 0.6 });
@@ -57,7 +57,7 @@ export class Pdf {
   }
   image(img, x, y, w, h) {
     let i = this.imgs.indexOf(img); if (i < 0) { this.imgs.push(img); i = this.imgs.length - 1; }
-    this.ops.push(`q ${n(w)} 0 0 ${n(h)} ${n(x)} ${n(this._y(y + h))} cm /Im${i} Do Q`);
+    this.ops.push(`q ${n(w * this.k)} 0 0 ${n(h * this.k)} ${n(x * this.k)} ${n(this._y(y + h))} cm /Im${i} Do Q`);
   }
   // Raw RGBA-less image from the generated module: {w,h,rgb(b64 zlib),a(b64 zlib)}
   static logo(d) { return { w: d.w, h: d.h, rgb: b64(d.rgb), a: b64(d.a) }; }
