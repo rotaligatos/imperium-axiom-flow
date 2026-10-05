@@ -13,8 +13,11 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
   try { companies = await rpc("iaf_my_companies"); } catch (e) { el.innerHTML = errBox(e); return; }
   if (!companies.length) { el.innerHTML = `<div class="empty">No company available.</div>`; return; }
   const cur = companies.find((c) => c.id === state.empCompany) || companies[0]; state.empCompany = cur.id;
-  let dir, lk;
-  try { [dir, lk] = await Promise.all([rpc("iaf_employee_directory", { p_company: cur.id }), rpc("iaf_org_lookups", { p_company: cur.id })]); } catch (e) { el.innerHTML = errBox(e); return; }
+  let dir, lk, extras;
+  try { [dir, lk, extras] = await Promise.all([rpc("iaf_employee_directory", { p_company: cur.id }), rpc("iaf_org_lookups", { p_company: cur.id }), rpc("iaf_employee_extras", { p_company: cur.id })]); } catch (e) { el.innerHTML = errBox(e); return; }
+  const xcache = {};   // lookups of other companies, loaded only when someone opens "add another position"
+  const extrasOf = (id) => extras.filter((x) => x.employee_id === id);
+  const visitors = extras.filter((x) => x.company_id === cur.id && x.home_company_id !== cur.id);
   const canLevels = state.isAdmin;
   const opt = (rows, val, label, sel, none) => `${none ? `<option value="">${esc(none)}</option>` : ""}${rows.map((r) => `<option value="${esc(r[val])}"${r[val] === sel ? " selected" : ""}>${esc(label(r))}</option>`).join("")}`;
   const roleLabel = (r) => `${r.title} (level ${r.level})`;
@@ -27,8 +30,13 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
       <div class="between"><div><b>${esc(p.full_name)}</b>${p.has_login ? ` <span class="chip ok">has login</span>` : ""}<br>
         <small>${esc(p.role_title || "No job title")}${p.role_level ? ` · level ${p.role_level}` : ""} · hired ${esc(fmtD(p.hire_date))}</small></div>
         <span class="chip ${p.status === "active" ? "ok" : "mute"}">${esc(p.status)}</span></div>
-      <button class="link" data-edit>Edit</button>
-      <form class="form" data-eform hidden>${personFields(p)}<div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Save</button></div></form></div>`;
+      ${extrasOf(p.id).map((x) => `<div class="between xpos"><small>➕ <b>${esc(x.company_code)}</b> · ${esc(x.dept_name)} · ${esc(x.role_title)}${x.note ? ` — ${esc(x.note)}` : ""}</small><button class="link" data-delpos="${esc(x.position_id)}">Remove</button></div>`).join("")}
+      <button class="link" data-edit>Edit</button> <button class="link" data-addpos>+ Another position</button>
+      <form class="form" data-eform hidden>${personFields(p)}<div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Save</button></div></form>
+      <form class="form" data-pform hidden><p class="s">Main position: <b>${esc(cur.short_code)}</b> · ${esc(p.dept_name || "—")} · ${esc(p.role_title || "—")}. Leave and the login always stay with the main company. This adds a second department or company.</p>
+        <label>Company<select name="pco">${companies.map((c) => `<option value="${esc(c.id)}">${esc(c.short_code)}</option>`).join("")}</select></label>
+        <div data-pbody><small>Loading…</small></div><div class="eerr"></div>
+        <div class="btns"><button class="btn primary" type="submit">Add position</button></div></form></div>`;
   function personFields(p) {
     p = p || {};
     return `<label>Full name<input name="name" required maxlength="80" value="${esc(p.full_name || "")}"></label>
@@ -49,8 +57,14 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
     <div class="between"><h2>People</h2><button class="btn" data-addp>+ Add a person</button></div>
     <div id="addbox" hidden><form class="card form" id="addemp">${personFields(null)}<div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Add person</button><button class="btn" type="button" data-canceladd>Cancel</button></div></form></div>
     <input class="search" id="empq" type="search" placeholder="Search name, job title or department" value="${esc(state.empQuery || "")}">
+    ${visitors.length ? `<details class="grp" open><summary><b>Also works here (main job elsewhere)</b> <span class="chip mute">${visitors.length}</span></summary>${visitors.map((x) => `<div class="card vperson"><div class="between"><div><b>${esc(x.full_name)}</b> <span class="chip mute">main: ${esc(x.home_code)}</span><br><small>${esc(x.role_title)} · ${esc(x.dept_name)}${x.note ? ` — ${esc(x.note)}` : ""}</small></div><button class="link" data-delpos="${esc(x.position_id)}">Remove</button></div></div>`).join("")}</details>` : ""}
     <div class="list">${Object.keys(groups).sort().map((g) => `<details class="grp" ${q || Object.keys(groups).length < 4 ? "open" : ""}><summary><b>${esc(g)}</b> <span class="chip mute">${groups[g].length}</span></summary>${groups[g].map(personCard).join("")}</details>`).join("") || `<div class="empty">No people yet. Upload a file above or add someone.</div>`}</div>
-    ${canLevels ? `<h2>Job titles &amp; levels</h2><div class="card"><p class="s">The level belongs to the job title, so everyone with that title follows it. Level 3+ can approve leave; level 4+ (Directors, Head of Plant Operation) sees everyone's leave in the company. Salary records are separate: only people marked “HR staff” in the Admin tab can read them.</p>
+    <h2>Job titles${canLevels ? " &amp; levels" : ""}</h2>
+    <div class="card"><b>Add a job title</b><p class="s">Needed before you can give someone that title. The level decides what the title can do (1 Staff · 2 Supervisor · 3 Manager · 4 Director/Head · 5 MD). Adding a title that already exists changes nothing.</p>
+      <form class="form" id="addrole"><div class="two"><label>Job title<input name="title" required maxlength="80"></label>
+        <label>Level<select name="level">${[1, 2, 3, 4, 5].map((n) => `<option value="${n}">${n} — ${LEVELS[n]}</option>`).join("")}</select></label></div><div class="eerr"></div>
+        <div class="btns"><button class="btn primary" type="submit">Add job title to ${esc(cur.short_code)}</button></div></form></div>
+    ${canLevels ? `<div class="card"><p class="s">The level belongs to the job title, so everyone with that title follows it. Level 3+ can approve leave; level 4+ (Directors, Head of Plant Operation) sees everyone's leave in the company. Salary records are separate: only people marked “HR staff” in the Admin tab can read them.</p>
       ${lk.roles.map((r) => `<div class="between lvl" data-role="${esc(r.id)}"><span>${esc(r.title)}</span><select>${[1, 2, 3, 4, 5].map((n) => `<option value="${n}"${n === r.level ? " selected" : ""}>${n} — ${LEVELS[n]}</option>`).join("")}</select></div>`).join("") || "<small>No job titles yet.</small>"}</div>` : ""}`;
 
   const reload = () => renderEmployees(el, { rpc, esc, toast, errBox, state });
@@ -66,14 +80,34 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
     if (ev.target.closest("[data-pick]")) return el.querySelector("#empfile").click();
     if (ev.target.closest("[data-addp]")) { el.querySelector("#addbox").hidden = false; return; }
     if (ev.target.closest("[data-canceladd]")) { el.querySelector("#addbox").hidden = true; return; }
-    const c = ev.target.closest(".person"); if (c && ev.target.closest("[data-edit]")) { const f = c.querySelector("[data-eform]"); f.hidden = !f.hidden; }
+    const dp = ev.target.closest("[data-delpos]"); if (dp) { if (!confirm("Remove this additional position?")) return; return guard(dp, null, () => rpc("iaf_position_delete", { p_id: dp.dataset.delpos }), "Position removed ✔"); }
+    const c = ev.target.closest(".person"); if (!c) return;
+    if (ev.target.closest("[data-edit]")) { const f = c.querySelector("[data-eform]"); f.hidden = !f.hidden; }
+    if (ev.target.closest("[data-addpos]")) { const f = c.querySelector("[data-pform]"); f.hidden = !f.hidden; if (!f.hidden) loadPosBody(f, f.pco.value); }
   };
+  async function loadPosBody(f, coId) {
+    const body = f.querySelector("[data-pbody]"); body.innerHTML = "<small>Loading…</small>";
+    try {
+      if (!xcache[coId]) { const [l, ppl] = await Promise.all([rpc("iaf_org_lookups", { p_company: coId }), rpc("iaf_company_people", { p_company: coId }).catch(() => [])]); xcache[coId] = { l, ppl }; }
+      const { l, ppl } = xcache[coId], pid = f.closest(".person").dataset.id;
+      body.innerHTML = `<div class="two"><label>Department<select name="pdept">${opt(l.departments, "id", (d) => d.name, "", "— choose —")}</select></label>
+        <label>Job title<select name="prole">${opt(l.roles, "id", roleLabel, "", "— choose —")}</select></label></div>
+        <label>Reports to <span class="opt">(optional)</span><select name="prep">${opt(ppl.filter((x) => x.id !== pid), "id", (x) => `${x.full_name} (${x.home_code})`, "", "— nobody / set later in Org chart —")}</select></label>
+        <label>Main responsibility there <span class="opt">(optional)</span><input name="pnote" maxlength="120" placeholder="e.g. Oversees plant maintenance"></label>`;
+    } catch (e) { body.innerHTML = errBox(e); }
+  }
   el.onsubmit = (ev) => {
     ev.preventDefault(); const f = ev.target, btn = f.querySelector("button[type=submit]"), box = f.querySelector(".eerr");
+    if (f.id === "addrole") return guard(btn, box, () => rpc("iaf_ensure_role", { p_company: cur.id, p_title: f.title.value.trim(), p_level: Number(f.level.value) }), "Job title added ✔");
+    if (f.matches("[data-pform]")) {
+      if (!f.pdept || !f.pdept.value || !f.prole.value) { box.innerHTML = errBox(new Error("Choose a department and a job title.")); return; }
+      return guard(btn, box, () => rpc("iaf_position_save", { p_id: null, p_employee_id: f.closest(".person").dataset.id, p_company: f.pco.value, p_dept_id: f.pdept.value, p_role_id: f.prole.value, p_reports_to: nz(f.prep.value), p_note: nz(f.pnote.value.trim()) }), "Position added ✔");
+    }
     if (f.id === "addemp") return guard(btn, box, () => rpc("iaf_employee_save", saveArgs(f, null)), "Person added ✔");
     if (f.matches("[data-eform]")) { const id = f.closest(".person").dataset.id; return guard(btn, box, () => rpc("iaf_employee_save", saveArgs(f, id)), "Saved ✔"); }
   };
   el.onchange = async (ev) => {
+    if (ev.target.name === "pco") return loadPosBody(ev.target.closest("form"), ev.target.value);
     const row = ev.target.closest(".lvl"); if (!row) return;
     try { await rpc("iaf_set_role_level", { p_role_id: row.dataset.role, p_level: Number(ev.target.value) }); toast("Level updated ✔"); await reload(); } catch (e) { toast(e.message, true); }
   };

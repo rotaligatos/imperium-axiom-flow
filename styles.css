@@ -112,3 +112,5 @@ fieldset.cos{border:1px solid #d8dee9;border-radius:10px;padding:8px 12px;margin
 .onode.ghost{position:fixed;z-index:50;pointer-events:none;opacity:.9;box-shadow:0 8px 24px #0004}
 .osel .orow{display:flex;gap:10px;align-items:center}.osel .oav{width:48px;height:48px}
 @media(max-width:760px){.otree ul.root{display:block;min-width:0}.otree li{align-items:stretch;padding:8px 0 0 14px}.otree li::before,.otree li::after,.otree li>ul::before{display:none}.otree li>ul{display:block;margin-left:10px;border-left:2px solid #cbd5e1;padding-left:4px}.otree ul.root>li{padding-left:0}.onode{max-width:none}}
+.xnode{border-style:dashed}
+.xpos{margin-top:4px}
