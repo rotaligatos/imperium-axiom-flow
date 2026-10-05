@@ -2,7 +2,8 @@
 // Salary figures found in an uploaded file are sent to the server and kept in a table only HR can read; this page never shows them.
 import { readAnyFile, mapEmployeeRows, suggestDeptMap } from "./xlsxread.js";
 
-const LEVELS = { 1: "Staff", 2: "Supervisor", 3: "Manager", 4: "HR / Director", 5: "Managing Director" };
+const RANKS = { 1: "Rank and File", 2: "Staff", 3: "Supervisor", 4: "Manager", 5: "Head / HR Manager", 6: "Director", 7: "Managing Director" };
+const RANK_OPTS = (sel) => [7, 6, 5, 4, 3, 2, 1].map((n) => `<option value="${n}"${n === sel ? " selected" : ""}>${RANKS[n]}</option>`).join("");
 const STATUS = ["active", "inactive", "separated"];
 const fmtD = (iso) => (iso ? new Date(iso + "T00:00:00").toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" }) : "—");
 const TEMPLATE = "Name,Position,Department,Hire Date,Employee No\n\"Dela Cruz, Juan\",Forklift Operator,Warehouse,2024-03-15,\n\"Reyes, Maria\",QA Inspector,QA,2023-07-01,\n";
@@ -20,7 +21,8 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
   const visitors = extras.filter((x) => x.company_id === cur.id && x.home_company_id !== cur.id);
   const canLevels = state.isAdmin;
   const opt = (rows, val, label, sel, none) => `${none ? `<option value="">${esc(none)}</option>` : ""}${rows.map((r) => `<option value="${esc(r[val])}"${r[val] === sel ? " selected" : ""}>${esc(label(r))}</option>`).join("")}`;
-  const roleLabel = (r) => `${r.title} (level ${r.level})`;
+  const roleLabel = (r) => `${r.title} · ${RANKS[r.rank] || ""}`;
+  const rankOf = Object.fromEntries(lk.roles.map((r) => [r.id, r.rank]));
   const q = (state.empQuery || "").toLowerCase();
   const shown = dir.filter((p) => !q || `${p.full_name} ${p.role_title || ""} ${p.dept_name || ""}`.toLowerCase().includes(q));
   const groups = {}; shown.forEach((p) => (groups[p.dept_name || "No department"] ||= []).push(p));
@@ -28,7 +30,7 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
 
   const personCard = (p) => `<div class="card person prow" data-id="${esc(p.id)}">
       <div class="between"><div class="pmain"><b>${esc(p.full_name)}</b>${p.has_login ? ` <span class="chip ok">login</span>` : ""}${p.status === "active" ? "" : ` <span class="chip mute">${esc(p.status)}</span>`}<br>
-        <small>${esc(p.role_title || "No job title")}${p.role_level ? ` · L${p.role_level}` : ""} · hired ${esc(fmtD(p.hire_date))}</small></div>
+        <small>${esc(p.role_title || "No job title")}${rankOf[p.role_id] ? ` · ${esc(RANKS[rankOf[p.role_id]])}` : ""} · hired ${esc(fmtD(p.hire_date))}</small></div>
         <div class="pact"><button class="link" data-edit>Edit</button><button class="link" data-addpos>+ Position</button></div></div>
       ${extrasOf(p.id).map((x) => `<div class="between xpos"><small>➕ <b>${esc(x.company_code)}</b> · ${esc(x.dept_name)} · ${esc(x.role_title)}${x.note ? ` — ${esc(x.note)}` : ""}</small><button class="link" data-delpos="${esc(x.position_id)}">Remove</button></div>`).join("")}
       <form class="form egrid" data-eform hidden>${personFields(p)}<div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-closeform>Close</button></div></form>
@@ -59,12 +61,12 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
     ${visitors.length ? `<details class="grp" open><summary><b>Also works here (main job elsewhere)</b> <span class="chip mute">${visitors.length}</span></summary>${visitors.map((x) => `<div class="card vperson"><div class="between"><div><b>${esc(x.full_name)}</b> <span class="chip mute">main: ${esc(x.home_code)}</span><br><small>${esc(x.role_title)} · ${esc(x.dept_name)}${x.note ? ` — ${esc(x.note)}` : ""}</small></div><button class="link" data-delpos="${esc(x.position_id)}">Remove</button></div></div>`).join("")}</details>` : ""}
     <div class="list">${Object.keys(groups).sort().map((g) => `<details class="grp" ${q || Object.keys(groups).length < 4 ? "open" : ""}><summary><b>${esc(g)}</b> <span class="chip mute">${groups[g].length}</span></summary><div class="gl">${groups[g].map(personCard).join("")}</div></details>`).join("") || `<div class="empty">No people yet. Upload a file above or add someone.</div>`}</div>
     <h2>Job titles${canLevels ? " &amp; levels" : ""}</h2>
-    <div class="card"><b>Add a job title</b><p class="s">Needed before you can give someone that title. The level decides what the title can do (1 Staff · 2 Supervisor · 3 Manager · 4 Director/Head · 5 MD). Adding a title that already exists changes nothing.</p>
-      <form class="form" id="addrole"><div class="two"><label>Job title<input name="title" required maxlength="80"></label>
-        <label>Level<select name="level">${[1, 2, 3, 4, 5].map((n) => `<option value="${n}">${n} — ${LEVELS[n]}</option>`).join("")}</select></label></div><div class="eerr"></div>
+    <div class="card"><b>Add a job title</b><p class="s">Needed before you can give someone that title. Pick where it sits on the ladder: Managing Director → Director → Head / HR Manager → Manager → Supervisor → Staff → Rank and File. Supervisor and above approve leave; Head and Director also see the company's leave. Adding a title that already exists changes nothing.</p>
+      <form class="form egrid" id="addrole"><label>Job title<input name="title" required maxlength="80"></label>
+        <label>Ladder<select name="rank">${RANK_OPTS(2)}</select></label><div class="eerr"></div>
         <div class="btns"><button class="btn primary" type="submit">Add job title to ${esc(cur.short_code)}</button></div></form></div>
-    ${canLevels ? `<div class="card"><p class="s">The level belongs to the job title, so everyone with that title follows it. Level 3+ can approve leave; level 4+ (Directors, Head of Plant Operation) sees everyone's leave in the company. Salary records are separate: only people marked “HR staff” in the Admin tab can read them.</p>
-      ${lk.roles.map((r) => `<div class="between lvl" data-role="${esc(r.id)}"><span>${esc(r.title)}</span><select>${[1, 2, 3, 4, 5].map((n) => `<option value="${n}"${n === r.level ? " selected" : ""}>${n} — ${LEVELS[n]}</option>`).join("")}</select></div>`).join("") || "<small>No job titles yet.</small>"}</div>` : ""}`;
+    ${canLevels ? `<div class="card"><p class="s">The ladder position belongs to the job title, so everyone with that title follows it. Supervisor and above approve leave (Staff and Rank and File never do, even if people report to them). Head and Director also see everyone's leave in the company. Salary records are separate: only people marked “HR staff” in the Admin tab can read them.</p>
+      ${lk.roles.map((r) => `<div class="between lvl" data-role="${esc(r.id)}"><span>${esc(r.title)}</span><select>${RANK_OPTS(r.rank)}</select></div>`).join("") || "<small>No job titles yet.</small>"}</div>` : ""}`;
 
   const reload = () => renderEmployees(el, { rpc, esc, toast, errBox, state });
   const nz = (v) => v || null;
@@ -99,7 +101,7 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
   }
   el.onsubmit = (ev) => {
     ev.preventDefault(); const f = ev.target, btn = f.querySelector("button[type=submit]"), box = f.querySelector(".eerr");
-    if (f.id === "addrole") return guard(btn, box, () => rpc("iaf_ensure_role", { p_company: cur.id, p_title: f.title.value.trim(), p_level: Number(f.level.value) }), "Job title added ✔");
+    if (f.id === "addrole") return guard(btn, box, () => rpc("iaf_ensure_role_rank", { p_company: cur.id, p_title: f.title.value.trim(), p_rank: Number(f.rank.value) }), "Job title added ✔");
     if (f.matches("[data-pform]")) {
       if (!f.pdept || !f.pdept.value || !f.prole.value) { box.innerHTML = errBox(new Error("Choose a department and a job title.")); return; }
       return guard(btn, box, () => rpc("iaf_position_save", { p_id: null, p_employee_id: f.closest(".person").dataset.id, p_company: f.pco.value, p_dept_id: f.pdept.value, p_role_id: f.prole.value, p_reports_to: nz(f.prep.value), p_note: nz(f.pnote.value.trim()) }), "Position added ✔");
@@ -110,7 +112,7 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
   el.onchange = async (ev) => {
     if (ev.target.name === "pco") return loadPosBody(ev.target.closest("form"), ev.target.value);
     const row = ev.target.closest(".lvl"); if (!row) return;
-    try { await rpc("iaf_set_role_level", { p_role_id: row.dataset.role, p_level: Number(ev.target.value) }); toast("Level updated ✔"); await reload(); } catch (e) { toast(e.message, true); }
+    try { await rpc("iaf_set_role_rank", { p_role_id: row.dataset.role, p_rank: Number(ev.target.value) }); toast("Saved ✔"); await reload(); } catch (e) { toast(e.message, true); }
   };
   el.querySelector("#empfile").onchange = (ev) => { const file = ev.target.files[0]; ev.target.value = ""; if (file) startImport(file); };
 
@@ -142,14 +144,14 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
     catch (e) { box.innerHTML = errBox(e); return; }
     const s = res.summary, warns = res.rows.filter((r) => r.warnings && r.warnings.length);
     const rawDepts = Object.keys(imp.rows.reduce((a, r) => (r.department ? ((a[r.department] = 1), a) : a), {}));
-    const levelOf = (t) => imp.levels[t.title] ?? t.level;
+    const levelOf = (t) => imp.levels[t.title] ?? t.rank;
     box.innerHTML = `<div class="imp">
       <label>Import into company<select id="impco">${companies.map((c) => `<option value="${esc(c.short_code)}"${c.short_code === imp.company ? " selected" : ""}>${esc(c.short_code)} — ${esc(c.name)}</option>`).join("")}</select></label>
       <div class="alert ok"><b>${rows2(imp.rows.length)} found.</b> ${s.create} new · ${s.update} already in the list (will be updated) · ${s.skip} skipped${imp.salary ? ` · salary records for ${imp.salary} (stored for HR only)` : ""}.</div>
       <h3>Departments</h3><p class="s">Fix spelling here if needed. Names that match an existing department are joined to it.</p>
       ${rawDepts.map((d) => `<div class="between deptmap"><span>${esc(d)}</span><input data-d="${esc(d)}" value="${esc(imp.deptMap[d] || d)}" maxlength="60"></div>`).join("")}
-      ${res.new_titles.length ? `<h3>New job titles — set the level</h3><p class="s">${res.new_titles.length} titles are new. I suggested a level from the wording (Manager = 3, Supervisor / Head = 2, otherwise Staff). Please check, especially anyone who approves leave.</p>
-        ${res.new_titles.map((t) => `<div class="between lvl2"><span>${esc(t.title)}</span><select data-t="${esc(t.title)}">${[1, 2, 3, 4, 5].map((n) => `<option value="${n}"${n === levelOf(t) ? " selected" : ""}>${n} — ${LEVELS[n]}</option>`).join("")}</select></div>`).join("")}` : ""}
+      ${res.new_titles.length ? `<h3>New job titles — place them on the ladder</h3><p class="s">${res.new_titles.length} titles are new. I suggested a position from the wording. Please check, especially anyone who approves leave (Supervisor and above).</p>
+        ${res.new_titles.map((t) => `<div class="between lvl2"><span>${esc(t.title)}</span><select data-t="${esc(t.title)}">${RANK_OPTS(levelOf(t))}</select></div>`).join("")}` : ""}
       ${warns.length ? `<h3>Please check</h3><ul class="warnlist">${warns.map((r) => `<li><b>${esc(r.name)}</b> — ${esc(r.warnings.join("; "))}</li>`).join("")}</ul>` : ""}
       <div id="iperr"></div><div class="btns"><button class="btn primary" id="doimp">Confirm &amp; import ${s.create + s.update} people</button><button class="btn" id="cancelimp">Cancel</button></div></div>`;
     const readInputs = () => { box.querySelectorAll("[data-d]").forEach((i) => { const v = i.value.trim(); if (v && v !== i.dataset.d) imp.deptMap[i.dataset.d] = v; else delete imp.deptMap[i.dataset.d]; });

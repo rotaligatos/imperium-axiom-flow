@@ -1,22 +1,23 @@
 // Administrator screen: who is who, what access they have (role / department / manager), add people, create roles & departments.
-const LEVELS = { 1: "Staff", 2: "Supervisor", 3: "Manager", 4: "HR / Director", 5: "Managing Director" };
+const RANKS = { 1: "Rank and File", 2: "Staff", 3: "Supervisor", 4: "Manager", 5: "Head / HR Manager", 6: "Director", 7: "Managing Director" };
+const RANK_OPTS = (sel) => [7, 6, 5, 4, 3, 2, 1].map((n) => `<option value="${n}"${n === sel ? " selected" : ""}>${RANKS[n]}</option>`).join("");
 
 export async function renderAdmin(el, { rest, rpc, esc, toast, errBox, userId }) {
   el.innerHTML = `<div class="empty">Loading…</div>`;
   let people, roles, depts, logins, cos, acc, hrs;
   try {
-    [people, roles, depts, logins, cos, acc, hrs] = await Promise.all([ rpc("iaf_admin_users"), rest("roles?is_active=eq.true&select=id,title,level&order=level.desc,title"),
+    [people, roles, depts, logins, cos, acc, hrs] = await Promise.all([ rpc("iaf_admin_users"), rest("roles?is_active=eq.true&select=id,title,level,rank_tier&order=rank_tier.desc,title"),
       rest("departments?select=id,name,has_supervisor_tier&order=name"), rpc("iaf_admin_unlinked_logins"), rpc("iaf_my_companies"), rpc("iaf_admin_company_access"), rpc("iaf_admin_hr_staff") ]);
   } catch (e) { el.innerHTML = errBox(e); return; }
   const opt = (rows, val, label, sel, none) => `${none ? `<option value="">${esc(none)}</option>` : ""}${rows.map((r) => `<option value="${esc(r[val])}"${r[val] === sel ? " selected" : ""}>${esc(label(r))}</option>`).join("")}`;
-  const roleLabel = (r) => `${r.title} — level ${r.level} (${LEVELS[r.level]})`;
+  const roleLabel = (r) => `${r.title} — ${RANKS[r.rank_tier] || ""}`;
   const isHr = (p) => hrs.some((h) => h.user_id === p.id);
   const otherCos = cos.filter((c) => !c.is_home);
   const statuses = ["active", "on_leave", "suspended", "terminated"];
   const card = (p) => `<div class="card person" data-id="${esc(p.id)}">
       <div class="between"><div><b>${esc(p.full_name)}</b>${p.is_admin ? ` <span class="chip ok">Admin</span>` : ""}${isHr(p) ? ` <span class="chip ok">HR staff</span>` : ""}<br><small>${esc(p.email || "no login linked")}</small></div>
         <span class="chip ${p.status === "active" ? "ok" : "mute"}">${esc(p.status)}</span></div>
-      <p class="s">${esc(p.role_title || "No role")}${p.role_level ? ` (level ${p.role_level})` : ""} · ${esc(p.dept_name || "No department")} · Reports to: ${esc(p.manager_name || "—")}</p>
+      <p class="s">${esc(p.role_title || "No role")} · ${esc(p.dept_name || "No department")} · Reports to: ${esc(p.manager_name || "—")}</p>
       <button class="link" data-edit>Edit access</button>
       <form class="form" data-form hidden>
         <label>Role<select name="role">${opt(roles, "id", roleLabel, p.role_id, "— none —")}</select></label>
@@ -29,7 +30,7 @@ export async function renderAdmin(el, { rest, rpc, esc, toast, errBox, userId })
           <button class="btn" type="button" data-hr="${isHr(p) ? "off" : "on"}">${isHr(p) ? "Remove HR staff" : "Make HR staff"}</button></div>
       </form></div>`;
   el.innerHTML = `
-    <div class="alert warn"><b>Access levels.</b> The role's level decides what a person can do: 1 Staff · 2 Supervisor · 3 Manager · 4 Director / Head of Plant Operation / HR (sees everyone's leave in the company) · 5 Managing Director. Salary records and the employee list are only for people marked “HR staff” (and administrators manage the list). “Admin” is separate — it lets someone manage people and access, and does not change their job level.</div>
+    <div class="alert warn"><b>Ladder.</b> Each job title sits on a ladder: Managing Director · Director · Head / HR Manager · Manager · Supervisor · Staff · Rank and File. Supervisor and above approve leave; Head and Director also see everyone's leave in the company. Salary records and the employee list are only for people marked “HR staff” (and administrators manage the list). “Admin” is separate — it lets someone manage people and access, and does not change their job level.</div>
     <h2>People</h2><div class="list">${people.map(card).join("") || `<div class="empty">No people yet.</div>`}</div>
     <h2>Add a person</h2>
     <form class="card form" id="addp">
@@ -42,9 +43,9 @@ export async function renderAdmin(el, { rest, rpc, esc, toast, errBox, userId })
       <div class="two"><label>VL days this year <span class="opt">(optional)</span><input name="vl" type="number" min="0" step="0.5" inputmode="decimal"></label>
         <label>SL days this year <span class="opt">(optional)</span><input name="sl" type="number" min="0" step="0.5" inputmode="decimal"></label></div>
       <div id="aerr"></div><button class="btn primary block" type="submit">Add person</button></form>
-    <h2>Roles</h2><div class="card"><p class="s">${roles.map((r) => `${esc(r.title)} (L${r.level})`).join(" · ") || "No roles yet."}</p>
+    <h2>Roles</h2><div class="card"><p class="s">${roles.map((r) => `${esc(r.title)} (${esc(RANKS[r.rank_tier] || "")})`).join(" · ") || "No roles yet."}</p>
       <form class="form" id="addr"><div class="two"><label>New role title<input name="title" required maxlength="60" placeholder="e.g. HR Manager"></label>
-        <label>Level<select name="level">${[1, 2, 3, 4, 5].map((n) => `<option value="${n}"${n === 4 ? " selected" : ""}>${n} — ${LEVELS[n]}</option>`).join("")}</select></label></div>
+        <label>Ladder<select name="rank">${RANK_OPTS(2)}</select></label></div>
         <div id="rerr"></div><button class="btn block" type="submit">Create role</button></form></div>
     <h2>Departments</h2><div class="card"><p class="s">${depts.map((d) => esc(d.name)).join(" · ") || "No departments yet."}</p>
       <form class="form" id="addd"><label>New department<input name="name" required maxlength="60"></label>
@@ -75,7 +76,7 @@ export async function renderAdmin(el, { rest, rpc, esc, toast, errBox, userId })
       return guard(btn, null, () => rpc("iaf_admin_set_user", { p_user_id: id, p_role_id: nz(f.role.value), p_dept_id: nz(f.dept.value), p_manager_id: nz(f.mgr.value), p_status: f.status.value }), "Saved ✔"); }
     if (f.id === "addp") return guard(btn, "#aerr", () => rpc("iaf_admin_link_user", { p_login_id: f.login.value, p_full_name: f.name.value.trim(), p_role_id: nz(f.role.value), p_dept_id: nz(f.dept.value), p_manager_id: nz(f.mgr.value),
       p_vl_days: f.vl.value === "" ? null : Number(f.vl.value), p_sl_days: f.sl.value === "" ? null : Number(f.sl.value) }), "Person added ✔");
-    if (f.id === "addr") return guard(btn, "#rerr", () => rpc("iaf_admin_create_role", { p_title: f.title.value.trim(), p_level: Number(f.level.value) }), "Role created ✔");
+    if (f.id === "addr") return guard(btn, "#rerr", () => rpc("iaf_admin_create_role_rank", { p_title: f.title.value.trim(), p_rank: Number(f.rank.value) }), "Role created ✔");
     if (f.id === "addd") return guard(btn, "#derr", () => rpc("iaf_admin_create_department", { p_name: f.name.value.trim(), p_has_supervisor_tier: !!f.sup.checked }), "Department created ✔");
   };
 }

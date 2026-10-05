@@ -1,6 +1,6 @@
 // Org chart (administrator / HR staff): one department at a time, drag a person onto their manager.
 // Drag works with mouse and touch (pointer events). Every box can also be edited without dragging (select a person → "Reports to").
-const LEVELS = { 1: "Staff", 2: "Supervisor", 3: "Manager", 4: "Director / Head", 5: "Managing Director" };
+const RANKS = { 1: "Rank and File", 2: "Staff", 3: "Supervisor", 4: "Manager", 5: "Head / HR Manager", 6: "Director", 7: "Managing Director" };
 const initials = (n) => (n || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
 
 // Resize a picked image to a small square JPEG (data URL) so it stays tiny.
@@ -24,9 +24,10 @@ export async function renderOrg(el, { rpc, esc, toast, errBox, state }) {
   catch (e) { el.innerHTML = errBox(e); return; }
   const photo = Object.fromEntries(photos.map((p) => [p.employee_id, p.data_url]));
   // Every box on the chart is a "node": a person's main position, or an additional position (extra) they hold in this company.
-  const mainNodes = dir.filter((p) => p.status === "active").map((p) => ({ nid: p.id, emp: p.id, full_name: p.full_name, role_id: p.role_id, role_title: p.role_title, role_level: p.role_level, dept_id: p.dept_id, dept_name: p.dept_name,
+  const rankOf = Object.fromEntries(lk.roles.map((r) => [r.id, r.rank || 0]));
+  const mainNodes = dir.filter((p) => p.status === "active").map((p) => ({ nid: p.id, emp: p.id, full_name: p.full_name, role_id: p.role_id, role_title: p.role_title, rk: rankOf[p.role_id] || 0, dept_id: p.dept_id, dept_name: p.dept_name,
     mgr: p.reports_to_id, extra: null, home: null, has_login: p.has_login }));
-  const extraNodes = extras.filter((x) => x.company_id === cur.id && x.status === "active").map((x) => ({ nid: "x:" + x.position_id, emp: x.employee_id, full_name: x.full_name, role_title: x.role_title, role_level: x.role_level,
+  const extraNodes = extras.filter((x) => x.company_id === cur.id && x.status === "active").map((x) => ({ nid: "x:" + x.position_id, emp: x.employee_id, full_name: x.full_name, role_title: x.role_title, rk: rankOf[x.role_id] || 0,
     dept_id: x.dept_id, dept_name: x.dept_name, mgr: x.reports_to_id, extra: x.position_id, home: x.home_code, homeSame: x.home_company_id === cur.id, has_login: x.has_login, note: x.note }));
   const active = [...mainNodes, ...extraNodes], byId = Object.fromEntries(active.map((p) => [p.nid, p]));
   const nameOf = Object.fromEntries([...dir.map((p) => [p.id, p.full_name]), ...extras.map((x) => [x.employee_id, x.full_name])]);
@@ -36,7 +37,7 @@ export async function renderOrg(el, { rpc, esc, toast, errBox, state }) {
   const nodeOfEmp = {}; view.forEach((p) => { if (!p.extra || !nodeOfEmp[p.emp]) nodeOfEmp[p.emp] = p.nid; });   // a person's main box wins over their extra boxes
   const parentOf = (p) => (p.mgr && nodeOfEmp[p.mgr] && nodeOfEmp[p.mgr] !== p.nid ? nodeOfEmp[p.mgr] : null);
   const kids = {}; view.forEach((p) => { const pa = parentOf(p); if (pa) (kids[pa] ||= []).push(p); });
-  const byRank = (a, b) => b.role_level - a.role_level || a.full_name.localeCompare(b.full_name);
+  const byRank = (a, b) => b.rk - a.rk || a.full_name.localeCompare(b.full_name);
   const roots = view.filter((p) => !parentOf(p)).sort(byRank);
   const tops = roots.filter((p) => kids[p.nid]), lone = roots.filter((p) => !kids[p.nid]);
   const descendants = (id, acc = new Set()) => { (kids[id] || []).forEach((k) => { acc.add(k.nid); descendants(k.nid, acc); }); return acc; };
@@ -63,7 +64,7 @@ export async function renderOrg(el, { rpc, esc, toast, errBox, state }) {
     <div class="otree">${tops.length ? `<ul class="root">${tops.map(tree).join("")}</ul>` : ""}
       ${lone.length ? `<div class="olone"><div class="olh"><b>${tops.length ? "Not placed under anyone yet" : "Nobody is placed yet"}</b> <small>(${lone.length}) — drag a name onto their manager</small></div><div class="olg">${lone.map(node).join("")}</div></div>` : ""}
       ${roots.length ? "" : `<div class="empty">Nobody in this department yet. Add or import people in the Employees tab.</div>`}</div>
-    ${sel ? `<div class="card osel"><div class="between"><div class="orow">${avatar(sel)}<div><b>${esc(sel.full_name)}</b><br><small>${esc(sel.role_title || "No job title")}${sel.role_level ? ` · level ${sel.role_level} (${LEVELS[sel.role_level]})` : ""} · ${esc(sel.dept_name || "no department")}${sel.extra ? ` · <b>extra position</b>${sel.homeSame ? "" : ` (main company ${esc(sel.home)})`}${sel.note ? ` — ${esc(sel.note)}` : ""}` : ""}</small></div></div>
+    ${sel ? `<div class="card osel"><div class="between"><div class="orow">${avatar(sel)}<div><b>${esc(sel.full_name)}</b><br><small>${esc(sel.role_title || "No job title")}${sel.rk ? ` · ${esc(RANKS[sel.rk])}` : ""} · ${esc(sel.dept_name || "no department")}${sel.extra ? ` · <b>extra position</b>${sel.homeSame ? "" : ` (main company ${esc(sel.home)})`}${sel.note ? ` — ${esc(sel.note)}` : ""}` : ""}</small></div></div>
         <button class="link" data-close>Close</button></div>
       <label>Reports to<select id="osel-rep">${optPeople(sel.emp, sel.mgr)}</select></label>
       <div class="btns"><button class="btn" data-photo>${photo[sel.emp] ? "Change photo" : "Add photo"}</button><input type="file" id="ofile" accept="image/*" hidden>
@@ -123,8 +124,9 @@ export async function renderOrg(el, { rpc, esc, toast, errBox, state }) {
   // keep scrolling while the pointer is held near an edge, so far-away managers can be reached
   const autoscroll = () => {
     if (!drag || !drag.on) return;
+    if (document.elementFromPoint(drag.px, drag.py)?.closest("[data-top]")) return requestAnimationFrame(autoscroll);   // hovering the top drop zone: hold still
     const tree = el.querySelector(".otree"), r = tree ? tree.getBoundingClientRect() : null, E = 70, S = 18;
-    if (drag.py < E) window.scrollBy(0, -S); else if (drag.py > innerHeight - E - (innerWidth < 900 ? 70 : 0)) window.scrollBy(0, S);
+    if (drag.py < E && scrollY > 0) window.scrollBy(0, -S); else if (drag.py > innerHeight - E - (innerWidth < 900 ? 70 : 0)) window.scrollBy(0, S);
     if (r && drag.py >= r.top && drag.py <= r.bottom) { if (drag.px < r.left + E) tree.scrollLeft -= S; else if (drag.px > r.right - E) tree.scrollLeft += S; }
     requestAnimationFrame(autoscroll);
   };
@@ -144,7 +146,7 @@ export async function renderOrg(el, { rpc, esc, toast, errBox, state }) {
     d.ghost.remove(); d.node.classList.remove("dragging"); const t = targetAt(ev.clientX, ev.clientY); clear();
     el._justDragged = true; setTimeout(() => (el._justDragged = false), 50);
     if (!t) return;
-    if (t.dataset.top) { if (byId[d.id].mgr) await setRep(d.id, null, "Moved to the top ✔"); return; }
+    if (t.dataset.top) { if (byId[d.id].mgr) await setRep(d.id, null, "Moved to the top ✔"); else toast("Already at the top - nobody above them.", true); return; }
     if (d.bad.has(t.dataset.id)) return toast("A person cannot report to themselves or to someone below them.", true);
     const target = byId[t.dataset.id];
     if (target.emp === byId[d.id].emp) return toast("That is the same person.", true);
