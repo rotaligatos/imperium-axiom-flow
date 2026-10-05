@@ -135,7 +135,14 @@ fieldset.cos{border:1px solid #d8dee9;border-radius:10px;padding:8px 12px;margin
 .onode .apv{position:absolute;top:4px;right:20px;background:#16a34a;color:#fff;border-radius:999px;font-size:11px;line-height:16px;width:16px;text-align:center}.apvrow{margin:6px 0}
 label.tick{display:inline-flex!important;flex-direction:row;align-items:center;gap:6px;font-weight:600}label.tick input{width:auto;min-width:0;min-height:0;margin:0}
 .mirrors{margin:6px 0 2px}.drow .pact{display:inline-flex;gap:14px;flex-wrap:wrap}.drow .between{align-items:flex-start;gap:8px}
-/* 201 file */
-.p201box{grid-column:1/-1;margin-top:8px;border-top:1px solid var(--line);padding-top:6px}.p201box h4{margin:14px 0 2px;font-size:.9rem}.p201box h4 small{font-weight:400;color:var(--mute)}
-.p201box .egrid .s{align-self:end}.p201box .kid{padding:5px 0;border-bottom:1px solid var(--line);font-size:.9rem}label.tick input{width:auto}
+/* 201 file — compact: sections fold, short fields sit side by side */
+.p201box{grid-column:1/-1;margin-top:6px;border-top:1px solid var(--line);padding-top:4px}
+.p201box details.sec{border-bottom:1px solid var(--line);padding:2px 0}.p201box details.sec>summary{cursor:pointer;font-weight:600;font-size:.88rem;padding:7px 0;list-style:none;display:flex;justify-content:space-between;align-items:center}
+.p201box details.sec>summary::-webkit-details-marker{display:none}.p201box details.sec>summary::after{content:"▾";color:var(--mute);margin-left:8px}.p201box details.sec[open]>summary::after{content:"▴"}
+.p201box details.sec>summary small{margin-left:auto;font-weight:400;color:var(--mute)}
+.p201box .egrid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:5px 10px;margin:2px 0 8px}.p201box .egrid .wide{grid-column:span 2}
+.p201box label{font-size:.7rem;gap:1px;color:var(--mute);font-weight:500}.p201box input,.p201box select{padding:4px 7px;font-size:.84rem;height:30px;min-height:0;color:var(--ink,inherit)}
+.p201box .egrid .s{align-self:center;grid-column:1/-1;margin:0}.p201box .kid{padding:4px 0;border-bottom:1px solid var(--line);font-size:.86rem}.p201box .btns{margin-top:6px}
+.p201box .btn{padding:7px 14px;min-height:0}label.tick input{width:auto;height:auto}
+@media(max-width:600px){.p201box .egrid{grid-template-columns:repeat(2,minmax(0,1fr))}.p201box .egrid .wide{grid-column:1/-1}}
 .filt{gap:8px;align-items:center}.filt .search{flex:1;margin:0}.filt select{width:auto;max-width:48%}.chglist{margin:8px 0;font-size:.9rem}.chglist summary{cursor:pointer;font-weight:600}

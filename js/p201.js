@@ -41,24 +41,26 @@ export async function renderP201(box, empId, { rpc, esc, toast, errBox }) {
   let d;
   try { d = await rpc("iaf_employee_201_get", { p_employee: empId }); } catch (e) { box.innerHTML = errBox(e); return; }
   const v = d.p201 || {}, val = (k) => { const x = v[k]; if (x == null) return ""; if (x === true) return "yes"; if (x === false) return "no"; if (k.startsWith("shift_")) return String(x).slice(0, 5); return String(x); };
+  const WIDE = new Set(["present_address", "permanent_address", "separation_reason", "edu_attainment", "spouse_name", "emergency_name", "middle_name"]);
   const field = ([k, label, type, opts]) => type === "sel"
-    ? `<label>${esc(label)}<select name="${k}">${opts.map(([o, t]) => `<option value="${o}"${o === val(k) ? " selected" : ""}>${esc(t)}</option>`).join("")}</select></label>`
-    : `<label>${esc(label)}<input name="${k}" type="${type === "num" ? "number" : type}"${type === "num" ? ' step="0.5" min="0"' : ""} maxlength="300" value="${esc(val(k))}"></label>`;
+    ? `<label${WIDE.has(k) ? ' class="wide"' : ""}>${esc(label)}<select name="${k}">${opts.map(([o, t]) => `<option value="${o}"${o === val(k) ? " selected" : ""}>${esc(t)}</option>`).join("")}</select></label>`
+    : `<label${WIDE.has(k) ? ' class="wide"' : ""}>${esc(label)}<input name="${k}" type="${type === "num" ? "number" : type}"${type === "num" ? ' step="0.5" min="0"' : ""} maxlength="300" value="${esc(val(k))}"></label>`;
   const verified = !!v.solo_verified_at;
   const soloState = v.solo_parent === true ? `<div class="s">${verified ? `<span class="chip ok">✔ Verified by HR${d.verified_by_name ? ` — ${esc(d.verified_by_name)}` : ""}, ${esc(fmtD(String(v.solo_verified_at).slice(0, 10)))}</span>` : `<span class="chip warn">Not verified by HR yet</span>`}
       ${d.can_verify ? `<label class="tick"><input type="checkbox" name="solo_verified"${verified ? " checked" : ""}> HR verified the SPIC${v.spic_valid_until ? ` (valid until ${esc(fmtD(v.spic_valid_until))})` : ""}</label>` : ""}</div>` : "";
   const kids = d.children || [];
   box.innerHTML = `<form class="form" data-p201form>
-      ${GROUPS.map(([title, fs]) => `<h4>${esc(title)}</h4><div class="egrid">${fs.map(field).join("")}${title === "Leave eligibility" ? soloState : ""}</div>`).join("")}
-      <h4>Government numbers</h4>${d.gov_visible ? `<div class="egrid">${GOV.map(([k, l]) => `<label>${esc(l)}<input name="${k}" maxlength="20" value="${esc((d.gov || {})[k] || "")}"></label>`).join("")}</div>` : `<p class="s">Visible to HR staff only.</p>`}
+      ${GROUPS.map(([title, fs], i) => { const n = fs.filter(([k]) => val(k) !== "").length;
+        return `<details class="sec"${i === 0 ? " open" : ""}><summary>${esc(title)} <small>${n}/${fs.length}</small></summary><div class="egrid">${fs.map(field).join("")}${title === "Leave eligibility" ? soloState : ""}</div></details>`; }).join("")}
+      <details class="sec"><summary>Government numbers <small>${d.gov_visible ? `${GOV.filter(([k]) => (d.gov || {})[k]).length}/4` : "HR only"}</small></summary>${d.gov_visible ? `<div class="egrid">${GOV.map(([k, l]) => `<label>${esc(l)}<input name="${k}" maxlength="20" value="${esc((d.gov || {})[k] || "")}"></label>`).join("")}</div>` : `<p class="s">Visible to HR staff only.</p>`}</details>
       <div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Save 201 file</button><button class="btn" type="button" data-pclose>Close</button></div></form>
-    <h4>Children &amp; deliveries <small>(for Paternity / Maternity checks)</small></h4>
+    <details class="sec"><summary>Children &amp; deliveries <small>${kids.length}</small></summary>
     <div class="kids">${kids.map((c) => `<div class="between kid" data-kid="${esc(c.id)}"><span>${c.event_type === "miscarriage" ? "Miscarriage" : esc(c.child_name || "Child")} · ${esc(fmtD(c.event_date))}${c.birth_cert_on_file ? ' <span class="chip ok">birth cert on file</span>' : ""}</span><button class="link" type="button" data-kdel>Delete</button></div>`).join("") || "<small>None listed.</small>"}</div>
     <form class="form egrid" data-kidform><label>Child name<input name="cname" maxlength="80" placeholder="optional for a miscarriage"></label>
       <label>Birth / miscarriage date<input name="cdate" type="date" required></label>
       <label>Type<select name="ctype"><option value="birth">Birth</option><option value="miscarriage">Miscarriage</option></select></label>
       <label class="tick"><input type="checkbox" name="ccert"> Birth certificate on file</label>
-      <div class="eerr"></div><div class="btns"><button class="btn" type="submit">Add</button></div></form>`;
+      <div class="eerr"></div><div class="btns"><button class="btn" type="submit">Add</button></div></form></details>`;
 
   box.onsubmit = async (ev) => {
     ev.preventDefault(); ev.stopPropagation(); const f = ev.target, btn = f.querySelector("button[type=submit]"), err = f.querySelector(".eerr"); err.innerHTML = ""; btn.disabled = true;
