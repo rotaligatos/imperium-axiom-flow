@@ -52,7 +52,7 @@ async function refreshBadge() {
 }
 
 // ---------- shell ----------
-function shell(active, title, body) {
+function shell(active, title, body, wide = false) {
   const nav = [["#/", "Home", "🏠", "home"], ["#/file", "File leave", "➕", "file"], ["#/requests", "My requests", "📄", "requests"],
     ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"]];
   const links = nav.map(([h, t, ic, k]) => `<a href="${h}" class="${active === k ? "on" : ""}" ${k === "approvals" ? 'data-approver-nav ' + (state.isApprover ? "" : "hidden") : ""}>
@@ -63,7 +63,7 @@ function shell(active, title, body) {
       <div class="me"><div class="av">${esc(initials(state.me?.full_name))}</div><div class="who">${esc(state.me?.full_name)}</div>
         <button class="link" data-act="signout">Sign out</button></div></aside>
     <main><header class="top"><h1>${esc(title)}</h1><button class="link only-mobile" data-act="signout">Sign out</button></header>
-      <div class="content">${body}</div></main>
+      <div class="content${wide ? " wide" : ""}">${body}</div></main>
     <nav class="tabs">${links}</nav></div>`;
 }
 const loading = (t = "Loading…") => `<div class="empty">${esc(t)}</div>`;
@@ -103,7 +103,7 @@ async function viewHome(tok) {
       const pct = Number(b.total_allotment) ? Math.max(0, Math.min(100, (Number(b.remaining) / Number(b.total_allotment)) * 100)) : 0;
       return `<div class="bal"><div class="bn">${name}</div><div class="bv">${num(b.remaining)}<small> days left</small></div>
         <div class="bar"><i style="width:${pct}%"></i></div><div class="bs">${num(b.used)} used of ${num(b.total_allotment)} in ${YEAR}</div></div>`; }).join("");
-    const recent = reqs.length ? reqs.map(reqRow).join("") : `<div class="empty">No requests yet.</div>`;
+    const recent = reqs.length ? reqs.map((r) => reqRow(r)).join("") : `<div class="empty">No requests yet.</div>`;
     el.innerHTML = `<div class="bals">${cards}</div>
       <a class="btn primary block" href="#/file">➕ File a leave</a>
       ${state.pending ? `<a class="notice" href="#/approvals"><b>${state.pending}</b> request${state.pending > 1 ? "s" : ""} waiting for your decision →</a>` : ""}
@@ -112,20 +112,12 @@ async function viewHome(tok) {
   } catch (e) { el.innerHTML = errBox(e); }
 }
 
-function reqRow(r) {
-  return `<a class="row" href="#/request/${esc(r.id)}"><div class="grow"><div class="t">${esc(r.leave_types?.display_name || "Leave")}${r.requester ? ` · ${esc(r.requester.full_name)}` : ""}</div>
+function reqRow(r, base = "#/requests/", activeId = null) {
+  return `<a class="row${r.id === activeId ? " on" : ""}" href="${base}${esc(r.id)}"><div class="grow"><div class="t">${esc(r.leave_types?.display_name || "Leave")}${r.requester ? ` · ${esc(r.requester.full_name)}` : ""}</div>
     <div class="s">${esc(fmtRange(r.start_date, r.end_date))} · ${num(r.days_requested)} day${Number(r.days_requested) === 1 ? "" : "s"}</div></div>${chip(r.status)}</a>`;
 }
 
-async function viewRequests(tok) {
-  shell("requests", "My requests", loading());
-  const el = document.querySelector(".content");
-  try {
-    const rows = await rest(`leave_requests?requester_id=eq.${userId()}&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name)&order=created_at.desc&limit=100`);
-    if (tok !== navToken) return;
-    el.innerHTML = rows.length ? `<div class="list">${rows.map(reqRow).join("")}</div>` : `<div class="empty">You haven't filed any leave yet.<br><a class="btn primary" href="#/file">File a leave</a></div>`;
-  } catch (e) { el.innerHTML = errBox(e); }
-}
+// (viewRequests / viewApprovals are now viewSplit, below)
 
 async function viewFile(tok) {
   shell("file", "File a leave", loading());
@@ -139,7 +131,7 @@ async function viewFile(tok) {
       <div class="two"><label>From<input type="date" name="start" value="${t}" required></label><label>To<input type="date" name="end" value="${t}" required></label></div>
       <label>Number of days<input type="number" name="days" min="0.5" step="0.5" inputmode="decimal" value="1" required>
         <small id="dayhint"></small></label>
-      <label><span>Reason <span class="opt">(optional)</span></span><textarea name="reason" rows="3" maxlength="500"></textarea></label>
+      <label><span>Reason</span><textarea name="reason" rows="3" maxlength="500" minlength="3" required placeholder="Tell your approver why you are filing this leave"></textarea></label>
       <label class="check" id="covrow" hidden><input type="checkbox" name="cov"><span>Use my Vacation Leave to cover an exhausted Sick Leave<small>This needs extra approval from the HR Manager.</small></span></label>
       <div id="ferr"></div><button class="btn primary block" type="submit">Submit for approval</button>
       <p class="fine">Your request goes to your approver automatically. You'll see its progress under “My requests”.</p></form>`;
@@ -160,34 +152,47 @@ async function viewFile(tok) {
       ev.preventDefault(); const btn = f.querySelector("button[type=submit]"); btn.disabled = true; btn.textContent = "Submitting…";
       document.getElementById("ferr").innerHTML = "";
       try {
+        if (f.reason.value.trim().length < 3) throw new Error("Please enter a reason for your leave.");
         const id = await rpc("iaf_leave_submit", { p_leave_type_code: f.type.value, p_start_date: f.start.value, p_end_date: f.end.value,
-          p_days: Number(f.days.value), p_reason: f.reason.value.trim() || null, p_is_wfh: f.type.value === "WFH", p_is_vl_covering_sl: !!f.cov.checked });
-        toast("Leave submitted ✔"); location.hash = `#/request/${id}`;
+          p_days: Number(f.days.value), p_reason: f.reason.value.trim(), p_is_wfh: f.type.value === "WFH", p_is_vl_covering_sl: !!f.cov.checked });
+        toast("Leave submitted ✔"); location.hash = `#/requests/${id}`;
       } catch (e) { document.getElementById("ferr").innerHTML = errBox(e); btn.disabled = false; btn.textContent = "Submit for approval"; }
     });
   } catch (e) { el.innerHTML = errBox(e); }
 }
 
-async function viewApprovals(tok) {
-  shell("approvals", "Approvals", loading());
-  const el = document.querySelector(".content");
-  try {
-    const rows = await rest(`leave_requests?current_approver_id=eq.${userId()}&status=in.(${PENDING_FOR_APPROVER.join(",")})&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name),requester:users!requester_id(full_name)&order=created_at`);
+const addDays = (s, n) => { const d = pd(s); d.setDate(d.getDate() + n); return ymd(d); };
+
+// List + detail. Phone: list OR detail (with a Back link). Desktop: side by side.
+async function viewSplit(tok, mode, id) {
+  const isAp = mode === "approvals";
+  shell(mode, isAp ? "Approvals" : "My requests",
+    `<div class="split ${id ? "has-detail" : ""}"><section class="pane-list" id="plist">${loading()}</section>
+     <section class="pane-detail" id="pdetail">${id ? loading() : `<div class="empty">Select a request to see its details.</div>`}</section></div>`, true);
+  const listEl = document.getElementById("plist"), detEl = document.getElementById("pdetail");
+  const base = `#/${mode}/`;
+  const q = isAp
+    ? `leave_requests?current_approver_id=eq.${userId()}&status=in.(${PENDING_FOR_APPROVER.join(",")})&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name),requester:users!requester_id(full_name)&order=created_at`
+    : `leave_requests?requester_id=eq.${userId()}&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name)&order=created_at.desc&limit=100`;
+  const listP = rest(q).then((rows) => {
     if (tok !== navToken) return;
-    state.pending = rows.length; refreshBadge();
-    el.innerHTML = rows.length ? `<div class="list">${rows.map(reqRow).join("")}</div>` : `<div class="empty">🎉 Nothing waiting for you.</div>`;
-  } catch (e) { el.innerHTML = errBox(e); }
+    if (isAp) { state.pending = rows.length; refreshBadge(); }
+    listEl.innerHTML = rows.length ? `<div class="list">${rows.map((r) => reqRow(r, base, id)).join("")}</div>`
+      : isAp ? `<div class="empty">🎉 Nothing waiting for you.</div>`
+      : `<div class="empty">You haven't filed any leave yet.<br><a class="btn primary" href="#/file">File a leave</a></div>`;
+  }).catch((e) => { listEl.innerHTML = errBox(e); });
+  const detP = id ? renderDetail(detEl, id, tok, mode) : Promise.resolve();
+  await Promise.all([listP, detP]);
 }
 
-async function viewRequest(tok, id) {
-  shell(location.hash.includes("from=ap") ? "approvals" : "requests", "Leave request", loading());
-  const el = document.querySelector(".content");
+async function renderDetail(el, id, tok, mode) {
   try {
     const [rows, apps] = await Promise.all([
       rest(`leave_requests?id=eq.${encodeURIComponent(id)}&select=*,leave_types(code,display_name),requester:users!requester_id(full_name),approver:users!current_approver_id(full_name)`),
       rest(`leave_approvals?leave_request_id=eq.${encodeURIComponent(id)}&select=*,approver:users!approver_id(full_name)&order=created_at`) ]);
     if (tok !== navToken) return;
-    const r = rows[0]; if (!r) { el.innerHTML = `<div class="empty">This request isn't available.</div>`; return; }
+    const back = `<a class="back" href="#/${mode}">‹ Back to list</a>`;
+    const r = rows[0]; if (!r) { el.innerHTML = back + `<div class="empty">This request isn't available.</div>`; return; }
     const mine = r.requester_id === userId();
     const lastCounter = [...apps].reverse().find((a) => a.action === "COUNTERED");
     let actions = "";
@@ -201,14 +206,15 @@ async function viewRequest(tok, id) {
       actions += `<div class="card"><h3>Your decision</h3><label><span>Notes <span class="opt">(optional)</span></span><textarea id="anote" rows="2" maxlength="500"></textarea></label>
         <div class="btns"><button class="btn primary" data-act="approve">Approve</button><button class="btn danger" data-act="reject">Reject</button>
         ${r.status !== "PENDING_HR_MANAGER" ? `<button class="btn" data-act="counter-open">Propose other dates</button>` : ""}</div>
-        <form id="cform" hidden class="form"><div class="two"><label>From<input type="date" name="s" value="${esc(r.start_date)}" required></label><label>To<input type="date" name="e" value="${esc(r.end_date)}" required></label></div>
-        <label>Days<input type="number" name="d" min="0.5" step="0.5" value="${esc(num(r.days_requested))}" required></label>
+        <form id="cform" hidden class="form"><div class="two"><label>New start date<input type="date" name="s" value="${esc(r.start_date)}" required></label><label>New end date<input type="date" name="e" value="${esc(r.end_date)}" required></label></div>
+        <label>Days<input type="number" name="d" min="0.5" step="0.5" inputmode="decimal" value="${esc(num(r.days_requested))}" required><small id="chint"></small></label>
+        <label><span>Reason for the change <span class="opt">(optional)</span></span><textarea name="cr" rows="2" maxlength="500" placeholder="e.g. We have a deadline that week"></textarea></label>
         <button class="btn primary block" type="submit">Send counter-proposal</button></form></div>`;
     }
     if (mine && CANCELLABLE.includes(r.status) && r.status !== "COUNTERED") actions += `<button class="btn danger block" data-act="cancel">Cancel this request</button>`;
     const tl = apps.map((a) => `<li><b>${esc(a.approver?.full_name || "Approver")}</b> ${a.action === "APPROVED" ? "approved" : a.action === "REJECTED" ? "rejected" : "proposed other dates"}
       <small>${esc(a.tier.replace("_", " ").toLowerCase())} · ${esc(new Date(a.created_at).toLocaleString())}</small>${a.notes ? `<em>“${esc(a.notes)}”</em>` : ""}</li>`).join("");
-    el.innerHTML = `<div class="card"><div class="between"><h2 class="nm">${esc(r.leave_types?.display_name)}</h2>${chip(r.status)}</div>
+    el.innerHTML = back + `<div class="card"><div class="between"><h2 class="nm">${esc(r.leave_types?.display_name)}</h2>${chip(r.status)}</div>
       ${!mine ? `<p class="s">Requested by <b>${esc(r.requester?.full_name)}</b></p>` : ""}
       <dl><dt>Dates</dt><dd>${esc(fmtRange(r.start_date, r.end_date))}</dd><dt>Days</dt><dd>${num(r.days_requested)}</dd>
       ${r.reason ? `<dt>Reason</dt><dd>${esc(r.reason)}</dd>` : ""}
@@ -216,30 +222,43 @@ async function viewRequest(tok, id) {
       ${r.is_unpaid_loa_conversion ? `<dt>Note</dt><dd>Balance ran out — converted to unpaid leave</dd>` : ""}
       ${r.approver && PENDING_FOR_APPROVER.includes(r.status) ? `<dt>Waiting on</dt><dd>${esc(r.approver.full_name)}</dd>` : ""}</dl></div>
       ${actions}<h3>History</h3>${tl ? `<ol class="tl">${tl}</ol>` : `<div class="empty small">No decisions yet.</div>`}`;
-    wireDetail(r);
+    wireDetail(el, r);
   } catch (e) { el.innerHTML = errBox(e); }
 }
 
-function wireDetail(r) {
-  const act = async (btn, fn, msg) => {
-    document.querySelectorAll(".content button").forEach((b) => (b.disabled = true));
+function wireDetail(el, r) {
+  const all = () => el.querySelectorAll("button");
+  const act = async (fn, msg) => {
+    all().forEach((b) => (b.disabled = true));
     try { const out = await fn(); toast(msg(out)); await refreshBadge(); route(); }
-    catch (e) { toast(e.message, true); document.querySelectorAll(".content button").forEach((b) => (b.disabled = false)); }
+    catch (e) { toast(e.message, true); all().forEach((b) => (b.disabled = false)); }
   };
-  const note = () => document.getElementById("anote")?.value.trim() || null;
-  document.querySelector(".content").onclick = (ev) => {
+  const note = () => el.querySelector("#anote")?.value.trim() || null;
+  el.onclick = (ev) => {
     const b = ev.target.closest("[data-act]"); if (!b) return; const a = b.dataset.act;
-    if (a === "approve") act(b, () => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "APPROVED", p_notes: note() }), (s) => `Approved → ${(STATUS[s] || [s])[0]}`);
-    if (a === "reject") { if (confirm("Reject this request?")) act(b, () => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "REJECTED", p_notes: note() }), () => "Request rejected"); }
-    if (a === "counter-open") document.getElementById("cform").hidden = false;
-    if (a === "accept") act(b, () => rpc("iaf_leave_respond_counter", { p_request_id: r.id, p_accept: true }), () => "Accepted — sent back for approval");
-    if (a === "decline") { if (confirm("Decline the proposal? This cancels your request.")) act(b, () => rpc("iaf_leave_respond_counter", { p_request_id: r.id, p_accept: false }), () => "Request cancelled"); }
-    if (a === "cancel") { if (confirm("Cancel this request?")) act(b, () => rpc("iaf_leave_cancel", { p_request_id: r.id }), () => "Request cancelled"); }
+    if (a === "approve") act(() => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "APPROVED", p_notes: note() }), (s) => `Approved → ${(STATUS[s] || [s])[0]}`);
+    if (a === "reject") { if (confirm("Reject this request?")) act(() => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "REJECTED", p_notes: note() }), () => "Request rejected"); }
+    if (a === "counter-open") el.querySelector("#cform").hidden = false;
+    if (a === "accept") act(() => rpc("iaf_leave_respond_counter", { p_request_id: r.id, p_accept: true }), () => "Accepted — sent back for approval");
+    if (a === "decline") { if (confirm("Decline the proposal? This cancels your request.")) act(() => rpc("iaf_leave_respond_counter", { p_request_id: r.id, p_accept: false }), () => "Request cancelled"); }
+    if (a === "cancel") { if (confirm("Cancel this request?")) act(() => rpc("iaf_leave_cancel", { p_request_id: r.id }), () => "Request cancelled"); }
   };
-  document.getElementById("cform")?.addEventListener("submit", (ev) => {
-    ev.preventDefault(); const f = ev.target;
-    act(null, () => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "COUNTERED", p_notes: note(), p_proposed_start: f.s.value, p_proposed_end: f.e.value, p_proposed_days: Number(f.d.value) }), () => "Counter-proposal sent");
-  });
+  const f = el.querySelector("#cform");
+  if (f) {
+    // Keep the original length: picking a new start moves the end date with it.
+    const origSpan = spanDays(r.start_date, r.end_date), origDays = Number(r.days_requested);
+    const hint = el.querySelector("#chint");
+    const fit = () => { const span = f.e.value >= f.s.value ? spanDays(f.s.value, f.e.value) : 0;
+      f.d.max = span || ""; if (span && Number(f.d.value) > span) f.d.value = span;
+      hint.textContent = span ? `${span} calendar day${span > 1 ? "s" : ""} between these dates.` : "End date must be on or after the start date."; };
+    f.s.addEventListener("change", () => { if (!f.s.value) return; f.e.value = addDays(f.s.value, origSpan - 1); f.d.value = origDays; fit(); });
+    f.e.addEventListener("change", () => { if (f.e.value < f.s.value) f.e.value = f.s.value; fit(); });
+    fit();
+    f.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      act(() => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "COUNTERED", p_notes: f.cr.value.trim() || note(), p_proposed_start: f.s.value, p_proposed_end: f.e.value, p_proposed_days: Number(f.d.value) }), () => "Counter-proposal sent");
+    });
+  }
 }
 
 let calMonth = null;
@@ -273,9 +292,8 @@ async function route() {
   const tok = ++navToken; const h = location.hash.replace(/^#/, "") || "/";
   const [, p, arg] = h.split("?")[0].split("/");
   if (p === "file") return viewFile(tok);
-  if (p === "requests") return viewRequests(tok);
-  if (p === "approvals") return viewApprovals(tok);
-  if (p === "request" && arg) return viewRequest(tok, arg);
+  if (p === "requests" || p === "approvals") return viewSplit(tok, p, arg || null);
+  if (p === "request" && arg) { location.replace(`#/requests/${arg}`); return; }
   if (p === "calendar") return viewCalendar(tok);
   return viewHome(tok);
 }
