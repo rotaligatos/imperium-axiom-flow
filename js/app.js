@@ -1,4 +1,5 @@
 import { buildAtrfPdf, fmtDate } from "./atrf.js";
+import { sign, registerDevice, myDevices, canSign } from "./sign.js";
 import { isConfigured, getSession, userId, signIn, signOut, rest, rpc } from "./api.js";
 
 const $app = document.getElementById("app");
@@ -93,9 +94,10 @@ async function viewHome(tok) {
   shell("home", `Hello, ${(state.me.full_name || "").split(" ")[0]}`, loading());
   const el = document.querySelector(".content");
   try {
-    const [bal, reqs] = await Promise.all([
+    const [bal, reqs, devs] = await Promise.all([
       rest(`vw_leave_balances_live?user_id=eq.${userId()}&year=eq.${YEAR}&select=leave_type_code,total_allotment,used,remaining`),
-      rest(`leave_requests?requester_id=eq.${userId()}&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name)&order=created_at.desc&limit=5`) ]);
+      rest(`leave_requests?requester_id=eq.${userId()}&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name)&order=created_at.desc&limit=5`),
+      myDevices().catch(() => []) ]);
     if (tok !== navToken) return;
     const cards = ["VL", "SL"].map((c) => {
       const b = bal.find((x) => x.leave_type_code === c);
@@ -109,7 +111,12 @@ async function viewHome(tok) {
       <a class="btn primary block" href="#/file">➕ File a leave</a>
       ${state.pending ? `<a class="notice" href="#/approvals"><b>${state.pending}</b> request${state.pending > 1 ? "s" : ""} waiting for your decision →</a>` : ""}
       <h2>Recent requests</h2><div class="list">${recent}</div>
-      ${reqs.length ? `<a class="link" href="#/requests">See all →</a>` : ""}`;
+      ${reqs.length ? `<a class="link" href="#/requests">See all →</a>` : ""}
+      <div class="card"><h3>My signature</h3><p class="s">${devs.length ? `✔ ${devs.length} device${devs.length > 1 ? "s" : ""} set up (${esc(devs.map((d) => d.label || "Device").join(", "))}). You sign with your fingerprint, face or device PIN.`
+        : "Not set up yet. You'll be asked the first time you file or approve — or set it up now."}</p>
+        <button class="btn block" data-act="reg-device">Set up this device</button></div>`;
+    el.querySelector("[data-act=reg-device]").onclick = async (ev) => { const b = ev.currentTarget; b.disabled = true;
+      try { await registerDevice(state.me?.full_name); toast("This device is set up ✔"); route(); } catch (e) { toast(e.message || "Could not set up this device", true); b.disabled = false; } };
   } catch (e) { el.innerHTML = errBox(e); }
 }
 
@@ -134,7 +141,7 @@ async function viewFile(tok) {
         <small id="dayhint"></small></label>
       <label><span>Reason</span><textarea name="reason" rows="3" maxlength="500" minlength="3" required placeholder="Tell your approver why you are filing this leave"></textarea></label>
       <label class="check" id="covrow" hidden><input type="checkbox" name="cov"><span>Use my Vacation Leave to cover an exhausted Sick Leave<small>This needs extra approval from the HR Manager.</small></span></label>
-      <div id="ferr"></div><button class="btn primary block" type="submit">Submit for approval</button>
+      <div id="ferr"></div><button class="btn primary block" type="submit">Sign &amp; submit</button><p class="s" style="text-align:center">Your fingerprint, face or device PIN is your signature on the form.</p>
       <p class="fine">Your request goes to your approver automatically. You'll see its progress under “My requests”.</p></form>`;
     const f = document.getElementById("ff");
     let touchedDays = false;
@@ -154,10 +161,13 @@ async function viewFile(tok) {
       document.getElementById("ferr").innerHTML = "";
       try {
         if (f.reason.value.trim().length < 3) throw new Error("Please enter a reason for your leave.");
+        btn.textContent = "Waiting for your fingerprint / face / PIN…";
+        const sig = await sign("SUBMIT", state.me?.full_name);
+        btn.textContent = "Submitting…";
         const id = await rpc("iaf_leave_submit", { p_leave_type_code: f.type.value, p_start_date: f.start.value, p_end_date: f.end.value,
-          p_days: Number(f.days.value), p_reason: f.reason.value.trim(), p_is_wfh: f.type.value === "WFH", p_is_vl_covering_sl: !!f.cov.checked });
+          p_days: Number(f.days.value), p_reason: f.reason.value.trim(), p_is_wfh: f.type.value === "WFH", p_is_vl_covering_sl: !!f.cov.checked, p_signature_id: sig });
         toast("Leave submitted ✔"); location.hash = `#/requests/${id}`;
-      } catch (e) { document.getElementById("ferr").innerHTML = errBox(e); btn.disabled = false; btn.textContent = "Submit for approval"; }
+      } catch (e) { document.getElementById("ferr").innerHTML = errBox(e); btn.disabled = false; btn.textContent = "Sign & submit"; }
     });
   } catch (e) { el.innerHTML = errBox(e); }
 }
@@ -201,11 +211,11 @@ async function renderDetail(el, id, tok, mode) {
       const pdays = lastCounter.proposed_days ?? spanDays(lastCounter.proposed_start_date, lastCounter.proposed_end_date);
       actions += `<div class="alert warn"><b>${esc(lastCounter.approver?.full_name)}</b> proposed different dates:<br><b>${esc(fmtRange(lastCounter.proposed_start_date, lastCounter.proposed_end_date))}</b> · ${num(pdays)} day(s)
         ${lastCounter.notes ? `<br><i>“${esc(lastCounter.notes)}”</i>` : ""}<br><small>If you accept, it goes through the full approval chain again.</small></div>
-        <div class="btns"><button class="btn primary" data-act="accept">Accept proposal</button><button class="btn" data-act="decline">Decline &amp; cancel</button></div>`;
+        <div class="btns"><button class="btn primary" data-act="accept">Accept &amp; sign</button><button class="btn" data-act="decline">Decline &amp; cancel</button></div>`;
     }
     if (r.current_approver_id === userId() && PENDING_FOR_APPROVER.includes(r.status)) {
-      actions += `<div class="card"><h3>Your decision</h3><label><span>Notes <span class="opt">(optional)</span></span><textarea id="anote" rows="2" maxlength="500"></textarea></label>
-        <div class="btns"><button class="btn primary" data-act="approve">Approve</button><button class="btn danger" data-act="reject">Reject</button>
+      actions += `<div class="card"><h3>Your decision</h3><p class="s">Approving or rejecting asks for your fingerprint, face or device PIN as your signature.</p><label><span>Notes <span class="opt">(optional)</span></span><textarea id="anote" rows="2" maxlength="500"></textarea></label>
+        <div class="btns"><button class="btn primary" data-act="approve">Approve &amp; sign</button><button class="btn danger" data-act="reject">Reject &amp; sign</button>
         ${r.status !== "PENDING_HR_MANAGER" ? `<button class="btn" data-act="counter-open">Propose other dates</button>` : ""}</div>
         <form id="cform" hidden class="form"><div class="two"><label>New start date<input type="date" name="s" value="${esc(r.start_date)}" required></label><label>New end date<input type="date" name="e" value="${esc(r.end_date)}" required></label></div>
         <label>Days<input type="number" name="d" min="0.5" step="0.5" inputmode="decimal" value="${esc(num(r.days_requested))}" required><small id="chint"></small></label>
@@ -238,10 +248,10 @@ function wireDetail(el, r) {
   const note = () => el.querySelector("#anote")?.value.trim() || null;
   el.onclick = (ev) => {
     const b = ev.target.closest("[data-act]"); if (!b) return; const a = b.dataset.act;
-    if (a === "approve") act(() => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "APPROVED", p_notes: note() }), (s) => `Approved → ${(STATUS[s] || [s])[0]}`);
-    if (a === "reject") { if (confirm("Reject this request?")) act(() => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "REJECTED", p_notes: note() }), () => "Request rejected"); }
+    if (a === "approve") act(async () => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "APPROVED", p_notes: note(), p_signature_id: await sign("APPROVE", state.me?.full_name) }), (s) => `Approved & signed → ${(STATUS[s] || [s])[0]}`);
+    if (a === "reject") { if (confirm("Reject this request?")) act(async () => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "REJECTED", p_notes: note(), p_signature_id: await sign("REJECT", state.me?.full_name) }), () => "Request rejected"); }
     if (a === "counter-open") el.querySelector("#cform").hidden = false;
-    if (a === "accept") act(() => rpc("iaf_leave_respond_counter", { p_request_id: r.id, p_accept: true }), () => "Accepted — sent back for approval");
+    if (a === "accept") act(async () => rpc("iaf_leave_respond_counter", { p_request_id: r.id, p_accept: true, p_signature_id: await sign("ACCEPT", state.me?.full_name) }), () => "Accepted & signed — sent back for approval");
     if (a === "decline") { if (confirm("Decline the proposal? This cancels your request.")) act(() => rpc("iaf_leave_respond_counter", { p_request_id: r.id, p_accept: false }), () => "Request cancelled"); }
     if (a === "pdf") downloadForm(r, el.__apps || [], b);
     if (a === "cancel") { if (confirm("Cancel this request?")) act(() => rpc("iaf_leave_cancel", { p_request_id: r.id }), () => "Request cancelled"); }
@@ -323,9 +333,11 @@ async function downloadForm(r, apps, btn) {
   const label = btn.textContent; btn.disabled = true; btn.textContent = "Preparing PDF…";
   try {
     const safe = async (p) => { try { return await rest(p); } catch { return []; } };
-    const [u, bal] = await Promise.all([
+    const [u, bal, sigs] = await Promise.all([
       safe(`users?id=eq.${encodeURIComponent(r.requester_id)}&select=full_name,roles(title),departments(name),companies(name,short_code)`),
-      safe(`vw_leave_balances_live?user_id=eq.${encodeURIComponent(r.requester_id)}&year=eq.${YEAR}&select=leave_type_code,remaining`) ]);
+      safe(`vw_leave_balances_live?user_id=eq.${encodeURIComponent(r.requester_id)}&year=eq.${YEAR}&select=leave_type_code,remaining`),
+      safe(`iaf_signatures?leave_request_id=eq.${encodeURIComponent(r.id)}&select=purpose,created_at,signer:users!user_id(full_name)&order=created_at`) ]);
+    const lastSig = (ps) => { const x = sigs.filter((g) => ps.includes(g.purpose)).slice(-1)[0]; return x ? { name: x.signer?.full_name || "", when: x.created_at, method: "biometric/PIN" } : null; };
     const emp = u[0] || {}, code = r.leave_types?.code;
     const left = (c) => { const b = bal.find((x) => x.leave_type_code === c); return b ? num(b.remaining) : null; };
     const final = apps.filter((a) => a.action === "APPROVED" || a.action === "REJECTED").slice(-1)[0];
@@ -337,7 +349,7 @@ async function downloadForm(r, apps, btn) {
       types: { vl: code === "VL", sl: code === "SL", unpaid: !!r.is_unpaid_loa_conversion },
       purpose: r.reason || "", from: fmtDate(r.start_date), to: fmtDate(r.end_date), total: `${num(r.days_requested)} day(s)`,
       decision, rejectReason: decision === "REJECTED" ? (final?.notes || "") : "", dateActioned: decision ? (final?.created_at || null) : null,
-      approverSig: null, employeeSig: null, hrSig: null, balVL: left("VL"), balSL: left("SL") });
+      approverSig: lastSig(["APPROVE", "REJECT"]), employeeSig: lastSig(["ACCEPT", "SUBMIT"]), hrSig: null, balVL: left("VL"), balSL: left("SL") });
     void first;
     const url = URL.createObjectURL(new Blob([pdf], { type: "application/pdf" }));
     const link = document.createElement("a"); link.href = url; link.download = `FO-HRMD-14_${(emp.full_name || "leave").replace(/\s+/g, "_")}_${r.start_date}.pdf`;
