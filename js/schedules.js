@@ -1,5 +1,6 @@
 // Work schedules (administrator / HR staff, desktop). Templates, assignment by company / department / person, upload, and who is on what.
 import { readAnyFile } from "./xlsxread.js";
+import { renderShiftHr } from "./shift.js";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const t12 = (hhmm) => { if (!hhmm) return ""; const [h, m] = hhmm.split(":").map(Number); return `${((h + 11) % 12) + 1}${m ? ":" + String(m).padStart(2, "0") : ""}${h < 12 ? "AM" : "PM"}`; };
@@ -69,6 +70,8 @@ export async function renderSchedules(el, ctx) {
     <h4>Current and upcoming assignments</h4>
     <div>${ov.assignments.map((a) => `<div class="between"><span><b>${esc(a.target)}</b> — ${esc(a.schedule)} <small>from ${esc(fmtD(a.from))}${a.to ? " to " + esc(fmtD(a.to)) : ""}</small></span><button class="link" data-un="${esc(a.id)}">Remove</button></div>`).join("") || "<small>Nothing assigned yet.</small>"}</div></div>
 
+  <div class="card" id="shr"></div>
+
   <div class="card"><h3>Upload people's schedules</h3>
     <p class="s">One row per person: Employee No (or Name), Schedule (exact template name), Effective From.</p>
     <div class="btns"><button class="btn" id="tpl">Blank template</button><label class="btn">Choose file<input type="file" id="sfile" accept=".csv,.xlsx" hidden></label></div><div id="simp"></div></div>
@@ -77,6 +80,7 @@ export async function renderSchedules(el, ctx) {
     ${Object.entries(peopleBy).map(([k, ps]) => `<details class="sec"><summary>${esc(k)} <small>${ps.length}</small></summary><div class="s">${ps.map((p) => esc(p.name) + (p.dept ? ` <small>(${esc(p.dept)})</small>` : "")).join(" · ")}</div></details>`).join("")}</div></div>`;
 
   el.querySelectorAll("[data-co]").forEach((b) => (b.onclick = () => { state0.co = b.dataset.co; reload(); }));
+  renderShiftHr(el.querySelector("#shr"), ctx, cur.id);
   const af = el.querySelector("#aform"), syncScope = () => { el.querySelector("#tdept").hidden = af.scope.value !== "department"; el.querySelector("#temp").hidden = af.scope.value !== "employee"; };
   af.scope.onchange = syncScope; syncScope(); af.from.value = new Date().toISOString().slice(0, 10);
   af.onsubmit = async (ev) => { ev.preventDefault(); const err = af.querySelector(".eerr"); err.innerHTML = ""; const btn = af.querySelector("button[type=submit]"); btn.disabled = true;

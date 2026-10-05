@@ -162,3 +162,4 @@ label.tick{display:inline-flex!important;flex-direction:row;align-items:center;g
 .nt{border-bottom:1px solid var(--line,#e5e7eb);padding:6px 0}.nt summary{cursor:pointer;font-weight:600}.nt-body{margin:6px 0;white-space:normal}
 .twocol{display:grid;grid-template-columns:minmax(300px,420px) 1fr;gap:16px;align-items:start}.nrow{padding:8px 0;border-bottom:1px solid var(--line,#e5e7eb)}
 .egrid label[hidden]{display:none!important}
+.people{display:grid;gap:4px;max-height:220px;overflow:auto;margin:4px 0}.sreq{margin:8px 0}
