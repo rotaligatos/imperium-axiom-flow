@@ -332,7 +332,7 @@ async function downloadForm(r, apps, btn) {
     const first = apps.find((a) => a.action === "APPROVED" || a.action === "REJECTED");
     const decision = r.status === "APPROVED" || r.status === "FILED" ? "APPROVED" : r.status === "REJECTED" ? "REJECTED" : null;
     const pdf = buildAtrfPdf({
-      companyName: emp.companies?.name || "", companyCode: emp.companies?.short_code || "", controlNo: "LV-" + String(r.id).slice(0, 8).toUpperCase(),
+      companyName: emp.companies?.name || "", companyCode: emp.companies?.short_code || "", controlNo: "QC26-001", ref: "LV-" + String(r.id).slice(0, 8).toUpperCase(),
       name: emp.full_name || r.requester?.full_name || "", dateFiled: r.created_at, designation: emp.roles?.title || "", department: emp.departments?.name || "",
       types: { vl: code === "VL", sl: code === "SL", unpaid: !!r.is_unpaid_loa_conversion },
       purpose: r.reason || "", from: fmtDate(r.start_date), to: fmtDate(r.end_date), total: `${num(r.days_requested)} day(s)`,
