@@ -1,6 +1,7 @@
 import { buildAtrfPdf, fmtDate } from "./atrf.js";
 import { renderAdmin } from "./admin.js";
 import { renderEmployees } from "./employees.js";
+import { renderOrg } from "./org.js";
 import { mountPad, pngToPdfImage } from "./sigpad.js";
 import { sign, registerDevice, myDevices, canSign } from "./sign.js";
 import { isConfigured, getSession, userId, signIn, signOut, rest, rpc } from "./api.js";
@@ -32,7 +33,7 @@ function toast(msg, bad = false) {
   $toast.textContent = msg; $toast.className = "show" + (bad ? " bad" : "");
   clearTimeout(toastTimer); toastTimer = setTimeout(() => ($toast.className = ""), 4200);
 }
-const state = { me: null, types: null, pending: 0, isApprover: false, isAdmin: false, canPeople: false, empCompany: null, empQuery: "" };
+const state = { me: null, types: null, pending: 0, isApprover: false, isAdmin: false, canPeople: false, empCompany: null, empQuery: "", orgCompany: null, orgDept: "", orgSel: null };
 let navToken = 0;
 
 // ---------- data ----------
@@ -62,7 +63,7 @@ async function refreshBadge() {
 // ---------- shell ----------
 function shell(active, title, body, wide = false) {
   const nav = [["#/", "Home", "🏠", "home"], ["#/file", "File leave", "➕", "file"], ["#/requests", "My requests", "📄", "requests"],
-    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
+    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/org", "Org chart", "🗂️", "org"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
   const links = nav.map(([h, t, ic, k]) => `<a href="${h}" class="${active === k ? "on" : ""}" ${k === "approvals" ? 'data-approver-nav ' + (state.isApprover ? "" : "hidden") : ""}>
       <span class="ic" aria-hidden="true">${ic}</span><span>${t}</span>${k === "approvals" ? `<b class="badge" data-badge ${state.pending ? "" : "hidden"}>${state.pending}</b>` : ""}</a>`).join("");
   $app.innerHTML = `<div class="layout">
@@ -326,6 +327,12 @@ async function viewEmployeesPage(tok) {
   const el = document.querySelector(".content"); if (tok !== navToken) return;
   await renderEmployees(el, { rpc, esc, toast, errBox, state });
 }
+async function viewOrgPage(tok) {
+  if (!state.canPeople) { location.replace("#/"); return; }
+  shell("org", "Org chart", loading(), true);
+  const el = document.querySelector(".content"); if (tok !== navToken) return;
+  await renderOrg(el, { rpc, esc, toast, errBox, state });
+}
 async function route() {
   if (!getSession()) return viewLogin();
   const tok = ++navToken; const h = location.hash.replace(/^#/, "") || "/";
@@ -336,6 +343,7 @@ async function route() {
   if (p === "calendar") return viewCalendar(tok);
   if (p === "admin") return viewAdminPage(tok);
   if (p === "employees") return viewEmployeesPage(tok);
+  if (p === "org") return viewOrgPage(tok);
   return viewHome(tok);
 }
 document.addEventListener("click", async (ev) => { $toast.className = "";
