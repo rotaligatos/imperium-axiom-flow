@@ -1,3 +1,4 @@
+import { buildAtrfPdf, fmtDate } from "./atrf.js";
 import { isConfigured, getSession, userId, signIn, signOut, rest, rpc } from "./api.js";
 
 const $app = document.getElementById("app");
@@ -221,8 +222,9 @@ async function renderDetail(el, id, tok, mode) {
       ${r.is_vl_covering_sl ? `<dt>Note</dt><dd>VL covering exhausted SL (HR Manager approval required)</dd>` : ""}
       ${r.is_unpaid_loa_conversion ? `<dt>Note</dt><dd>Balance ran out — converted to unpaid leave</dd>` : ""}
       ${r.approver && PENDING_FOR_APPROVER.includes(r.status) ? `<dt>Waiting on</dt><dd>${esc(r.approver.full_name)}</dd>` : ""}</dl></div>
+      <button class="btn block" data-act="pdf">Download form (PDF)</button>
       ${actions}<h3>History</h3>${tl ? `<ol class="tl">${tl}</ol>` : `<div class="empty small">No decisions yet.</div>`}`;
-    wireDetail(el, r);
+    el.__apps = apps; wireDetail(el, r);
   } catch (e) { el.innerHTML = errBox(e); }
 }
 
@@ -241,6 +243,7 @@ function wireDetail(el, r) {
     if (a === "counter-open") el.querySelector("#cform").hidden = false;
     if (a === "accept") act(() => rpc("iaf_leave_respond_counter", { p_request_id: r.id, p_accept: true }), () => "Accepted — sent back for approval");
     if (a === "decline") { if (confirm("Decline the proposal? This cancels your request.")) act(() => rpc("iaf_leave_respond_counter", { p_request_id: r.id, p_accept: false }), () => "Request cancelled"); }
+    if (a === "pdf") downloadForm(r, el.__apps || [], b);
     if (a === "cancel") { if (confirm("Cancel this request?")) act(() => rpc("iaf_leave_cancel", { p_request_id: r.id }), () => "Request cancelled"); }
   };
   const f = el.querySelector("#cform");
@@ -314,3 +317,31 @@ async function start() {
   setInterval(tick, 60000); document.addEventListener("visibilitychange", () => !document.hidden && tick());
 }
 start();
+
+// ---------- PDF form (FO-HRMD-14) ----------
+async function downloadForm(r, apps, btn) {
+  const label = btn.textContent; btn.disabled = true; btn.textContent = "Preparing PDF…";
+  try {
+    const safe = async (p) => { try { return await rest(p); } catch { return []; } };
+    const [u, bal] = await Promise.all([
+      safe(`users?id=eq.${encodeURIComponent(r.requester_id)}&select=full_name,roles(title),departments(name),companies(name,short_code)`),
+      safe(`vw_leave_balances_live?user_id=eq.${encodeURIComponent(r.requester_id)}&year=eq.${YEAR}&select=leave_type_code,remaining`) ]);
+    const emp = u[0] || {}, code = r.leave_types?.code;
+    const left = (c) => { const b = bal.find((x) => x.leave_type_code === c); return b ? num(b.remaining) : null; };
+    const final = apps.filter((a) => a.action === "APPROVED" || a.action === "REJECTED").slice(-1)[0];
+    const first = apps.find((a) => a.action === "APPROVED" || a.action === "REJECTED");
+    const decision = r.status === "APPROVED" || r.status === "FILED" ? "APPROVED" : r.status === "REJECTED" ? "REJECTED" : null;
+    const pdf = buildAtrfPdf({
+      companyName: emp.companies?.name || "", companyCode: emp.companies?.short_code || "", controlNo: "LV-" + String(r.id).slice(0, 8).toUpperCase(),
+      name: emp.full_name || r.requester?.full_name || "", dateFiled: r.created_at, designation: emp.roles?.title || "", department: emp.departments?.name || "",
+      types: { vl: code === "VL", sl: code === "SL", unpaid: !!r.is_unpaid_loa_conversion },
+      purpose: r.reason || "", from: fmtDate(r.start_date), to: fmtDate(r.end_date), total: `${num(r.days_requested)} day(s)`,
+      decision, rejectReason: decision === "REJECTED" ? (final?.notes || "") : "", dateActioned: decision ? (final?.created_at || null) : null,
+      approverSig: null, employeeSig: null, hrSig: null, balVL: left("VL"), balSL: left("SL") });
+    void first;
+    const url = URL.createObjectURL(new Blob([pdf], { type: "application/pdf" }));
+    const link = document.createElement("a"); link.href = url; link.download = `FO-HRMD-14_${(emp.full_name || "leave").replace(/\s+/g, "_")}_${r.start_date}.pdf`;
+    document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+  } catch (e) { toast(e.message || "Could not make the PDF", true); }
+  finally { btn.disabled = false; btn.textContent = label; }
+}
