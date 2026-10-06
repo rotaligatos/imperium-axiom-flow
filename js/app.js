@@ -139,12 +139,14 @@ async function viewHome(tok) {
       mountPad(el.querySelector("#padhost"), { onCancel: () => route(), onSave: async (png) => { await rpc("iaf_signature_image_save", { p_png_base64: png }); toast("Signature saved ✔"); route(); } }); };
     // Extras never block the Home screen: a slow or failing call just leaves that card out.
     const soft = (pr, ms = 8000) => Promise.race([pr, new Promise((r) => setTimeout(() => r(null), ms))]).catch(() => null);
-    Promise.all([soft(rpc("iaf_my_schedule", { p_days: 7 })), soft(rpc("iaf_my_announcements")), soft(rpc("iaf_shift_change_inbox")), soft(rpc("iaf_time_adj_inbox"))]).then(([mySch, myNotices, shiftIn, timeIn]) => {
+    Promise.all([soft(rpc("iaf_my_schedule", { p_days: 7 })), soft(rpc("iaf_my_announcements")), soft(rpc("iaf_shift_change_inbox")), soft(rpc("iaf_time_adj_inbox")), soft(rpc("iaf_shift_change_news")), soft(rpc("iaf_shift_change_mine"))]).then(([mySch, myNotices, shiftIn, timeIn, shiftNews, shiftMine]) => {
       const box = document.getElementById("homeextra"); if (!box || tok !== navToken) return;
       const schedCard = mySch && mySch.linked && mySch.days.length ? `<div class="card mysched"><h3>My schedule</h3>${mySch.days.map((d, i) => `<div class="row${i === 0 ? " today" : ""}${d.rest ? " rest" : ""}"><span>${i === 0 ? "Today" : new Date(d.date + "T00:00:00").toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" })}</span><span>${esc(dayLine(d))}</span></div>`).join("")}${mySch.days[0].schedule ? `<p class="s">${esc(mySch.days[0].schedule)}</p>` : ""}</div>` : "";
       const shiftCard = Array.isArray(shiftIn) && shiftIn.length ? `<a class="notice" href="#/shift"><b>${shiftIn.length}</b> shift change request${shiftIn.length > 1 ? "s" : ""} waiting for your decision →</a>` : "";
       const timeCard = Array.isArray(timeIn) && timeIn.length ? `<a class="notice" href="#/time"><b>${timeIn.length}</b> half-day / undertime filing${timeIn.length > 1 ? "s" : ""} waiting for your decision →</a>` : "";
-      box.innerHTML = shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + `<a class="btn block" href="#/shift">🔄 Change shift</a><a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>`;
+      const retCard = Array.isArray(shiftMine) && shiftMine.some((r) => r.mine && r.status === "returned") ? `<a class="notice" href="#/shift">A shift change you filed was returned to you for changes →</a>` : "";
+      const newsCard = (Array.isArray(shiftNews) ? shiftNews : []).map((r) => `<div class="notice"><b>Shift change approved:</b> ${esc(r.schedule)} for ${esc(r.dept ? "department " + r.dept : r.people.slice(0, 3).join(", ") + (r.people.length > 3 ? " +" + (r.people.length - 3) : ""))}, from ${esc(r.start_date)}${r.end_date ? " to " + esc(r.end_date) : ""} <button class="link" data-newsseen="${esc(r.id)}">Got it</button></div>`).join("");
+      box.innerHTML = retCard + newsCard + shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + `<a class="btn block" href="#/shift">🔄 Change shift</a><a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>`;
     });
   } catch (e) { el.innerHTML = errBox(e); }
 }
@@ -387,6 +389,8 @@ async function route() {
   return viewHome(tok);
 }
 document.addEventListener("click", async (ev) => { $toast.className = "";
+  const nseen = ev.target.closest("[data-newsseen]");
+  if (nseen) { nseen.closest(".notice").remove(); try { await rpc("iaf_shift_change_news_seen", { p_id: nseen.dataset.newsseen }); } catch {} return; }
   const ack = ev.target.closest("[data-ack]");
   if (ack) { ack.disabled = true; try { await rpc("iaf_announcement_ack", { p_id: ack.dataset.ack }); toast("Thank you ✔"); route(); } catch (e) { toast(e.message, true); ack.disabled = false; } return; }
   if (ev.target.closest("[data-act=signout]")) { await signOut(); state.me = null; state.isApprover = false; state.isAdmin = false; state.canPeople = false; state.empCompany = null; state.pending = 0; location.hash = "#/"; route(); }
