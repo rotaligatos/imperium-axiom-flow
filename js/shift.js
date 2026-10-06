@@ -28,18 +28,23 @@ export function wireDecisions(root, { rpc, toast, esc, errBox }, after, needNote
   };
 }
 
-export async function renderShift(el, ctx) {
+export async function renderShift(el, ctx, company = null) {
   const { rpc, esc, toast, errBox } = ctx;
   el.innerHTML = `<div class="empty loading">Loading…</div>`;
   let form, inbox, mine;
-  try { [form, inbox, mine] = await Promise.all([rpc("iaf_shift_change_form"), rpc("iaf_shift_change_inbox"), rpc("iaf_shift_change_mine")]); } catch (e) { el.innerHTML = errBox(e); return; }
-  const reload = () => renderShift(el, ctx), min = ymd(new Date(manilaToday().getTime() + 2 * 86400000));
+  try { [form, inbox, mine] = await Promise.all([rpc("iaf_shift_change_form", company ? { p_company: company } : {}), rpc("iaf_shift_change_inbox"), rpc("iaf_shift_change_mine")]); } catch (e) { el.innerHTML = errBox(e); return; }
+  const reload = () => renderShift(el, ctx, form.company_id), min = ymd(new Date(manilaToday().getTime() + 2 * 86400000));
   if (!form.linked) { el.innerHTML = `<div class="alert bad">Your login is not linked to an employee record yet. Please contact HR.</div>`; return; }
   el.innerHTML = `${inbox.length ? `<h2>Waiting for your decision</h2>${inbox.map((r) => reqCard(r, esc, decideBtns())).join("")}` : ""}
     <h2>Request a shift change</h2>
     <form class="form card" id="sform">
       <div class="s">Must be filed at least 2 days before it starts. Your approver and HR will see it.</div>
-      <label>Who<div class="people">${form.people.map((p) => `<label class="tick"><input type="checkbox" name="emp" value="${esc(p.id)}"${form.people.length === 1 || p.me ? " checked" : ""}> ${esc(p.name)}${p.me ? " (me)" : ""}</label>`).join("")}</div></label>
+      ${form.companies && form.companies.length > 1 ? `<label>Company<select name="co">${form.companies.map((c) => `<option value="${esc(c.id)}"${c.id === form.company_id ? " selected" : ""}>${esc(c.code)} — ${esc(c.name)}</option>`).join("")}</select></label>` : ""}
+      ${form.depts && form.depts.length ? `<label>Change for<select name="scope"><option value="people">Selected people</option><option value="dept">A whole department (needs the department head's approval)</option></select></label>
+      <label data-sc="dept" hidden>Department<select name="dept">${form.depts.map((d) => `<option value="${esc(d.id)}">${esc(d.section_of ? d.section_of + " › " : "")}${esc(d.name)} (${d.people} people)</option>`).join("")}</select></label>
+      <div class="s" data-sc="dept" hidden>The new schedule is set on the department, so new people joining it follow it too. Anyone with a personal schedule keeps their own.</div>` : ""}
+      <div data-sc="people"><span class="s">Who</span><div class="people">${(() => { const g = {}; form.people.forEach((p) => (g[p.me ? "Me" : p.dept || "No department"] ||= []).push(p));
+        return Object.entries(g).map(([k, ps]) => `<div class="s"><b>${esc(k)}</b>${ps.length > 1 ? ` <button type="button" class="link" data-all="${esc(k)}">select all</button>` : ""}</div>` + ps.map((p) => `<label class="tick" data-g="${esc(k)}"><input type="checkbox" name="emp" value="${esc(p.id)}"${form.people.length === 1 || p.me ? " checked" : ""}> ${esc(p.name)}${p.me ? " (me)" : ""}</label>`).join("")).join(""); })()}</div></div>
       <label>New schedule<select name="sch">${form.schedules.map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}</select></label>
       <label>Starting<input name="start" type="date" min="${min}" value="${min}" required></label>
       <label>Until (blank = until further notice)<input name="end" type="date"></label>
@@ -47,9 +52,13 @@ export async function renderShift(el, ctx) {
       <div class="eerr"></div><button class="btn primary block" type="submit">Submit request</button></form>
     <h2>My requests</h2>${mine.map((r) => reqCard(r, esc, r.mine && r.status === "pending" ? `<div class="btns"><button class="btn" data-cancel>Cancel request</button></div>` : "")).join("") || `<div class="empty">Nothing filed yet.</div>`}`;
   const f = el.querySelector("#sform");
+  const syncScope = () => { const d = f.scope && f.scope.value === "dept"; f.querySelectorAll("[data-sc]").forEach((x) => (x.hidden = (x.dataset.sc === "dept") !== !!d)); };
+  if (f.scope) { f.scope.onchange = syncScope; syncScope(); }
+  if (f.co) f.co.onchange = () => renderShift(el, ctx, f.co.value);
+  f.querySelectorAll("[data-all]").forEach((b) => (b.onclick = () => f.querySelectorAll("[data-g]").forEach((l) => { if (l.dataset.g === b.dataset.all) l.querySelector("input").checked = true; })));
   f.onsubmit = async (ev) => { ev.preventDefault(); const err = f.querySelector(".eerr"); err.innerHTML = ""; const btn = f.querySelector("button[type=submit]"); btn.disabled = true;
-    const emps = [...f.querySelectorAll("[name=emp]:checked")].map((c) => c.value);
-    try { await rpc("iaf_shift_change_file", { p_employees: emps, p_schedule: f.sch.value, p_start: f.start.value, p_end: f.end.value || null, p_reason: f.reason.value }); toast("Submitted ✔"); reload(); }
+    const dept = f.scope && f.scope.value === "dept", emps = dept ? [] : [...f.querySelectorAll("[name=emp]:checked")].map((c) => c.value);
+    try { await rpc("iaf_shift_change_file", { p_employees: emps, p_schedule: f.sch.value, p_start: f.start.value, p_end: f.end.value || null, p_reason: f.reason.value, ...(dept ? { p_dept: f.dept.value } : {}) }); toast("Submitted ✔"); reload(); }
     catch (e) { err.innerHTML = errBox(e); btn.disabled = false; } };
   wireDecisions(el, ctx, reload);
 }
