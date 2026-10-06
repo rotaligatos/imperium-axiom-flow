@@ -6,6 +6,7 @@ import { renderSchedules, dayLine } from "./schedules.js";
 import { renderNotices, noticesHtml } from "./announcements.js";
 import { renderShift } from "./shift.js";
 import { renderTime } from "./timeadj.js";
+import { renderHolidays } from "./holidays.js";
 import { mountPad, pngToPdfImage } from "./sigpad.js";
 import { sign, registerDevice, myDevices, canSign } from "./sign.js";
 import { isConfigured, getSession, userId, signIn, signOut, rest, rpc } from "./api.js";
@@ -67,7 +68,7 @@ async function refreshBadge() {
 // ---------- shell ----------
 function shell(active, title, body, wide = false) {
   const nav = [["#/", "Home", "🏠", "home"], ["#/file", "File leave", "➕", "file"], ["#/requests", "My requests", "📄", "requests"],
-    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ["#/shift", "Change shift", "🔄", "shift"], ["#/time", "Half-day / Undertime", "⏱️", "time"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/org", "Org chart", "🗂️", "org"], ["#/schedules", "Schedules", "🕒", "schedules"], ["#/notices", "Notices", "📢", "notices"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
+    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ["#/shift", "Change shift", "🔄", "shift"], ["#/time", "Half-day / Undertime", "⏱️", "time"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/org", "Org chart", "🗂️", "org"], ["#/schedules", "Schedules", "🕒", "schedules"], ["#/notices", "Notices", "📢", "notices"], ["#/holidays", "Holidays", "🎌", "holidays"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
   const links = nav.map(([h, t, ic, k]) => `<a href="${h}" class="${active === k ? "on" : ""}" ${k === "approvals" ? 'data-approver-nav ' + (state.isApprover ? "" : "hidden") : ""}>
       <span class="ic" aria-hidden="true">${ic}</span><span>${t}</span>${k === "approvals" ? `<b class="badge" data-badge ${state.pending ? "" : "hidden"}>${state.pending}</b>` : ""}</a>`).join("");
   $app.innerHTML = `<div class="layout">
@@ -139,14 +140,16 @@ async function viewHome(tok) {
       mountPad(el.querySelector("#padhost"), { onCancel: () => route(), onSave: async (png) => { await rpc("iaf_signature_image_save", { p_png_base64: png }); toast("Signature saved ✔"); route(); } }); };
     // Extras never block the Home screen: a slow or failing call just leaves that card out.
     const soft = (pr, ms = 8000) => Promise.race([pr, new Promise((r) => setTimeout(() => r(null), ms))]).catch(() => null);
-    Promise.all([soft(rpc("iaf_my_schedule", { p_days: 7 })), soft(rpc("iaf_my_announcements")), soft(rpc("iaf_shift_change_inbox")), soft(rpc("iaf_time_adj_inbox")), soft(rpc("iaf_shift_change_news")), soft(rpc("iaf_shift_change_mine"))]).then(([mySch, myNotices, shiftIn, timeIn, shiftNews, shiftMine]) => {
+    Promise.all([soft(rpc("iaf_my_schedule", { p_days: 7 })), soft(rpc("iaf_my_announcements")), soft(rpc("iaf_shift_change_inbox")), soft(rpc("iaf_time_adj_inbox")), soft(rpc("iaf_shift_change_news")), soft(rpc("iaf_shift_change_mine")), soft(rpc("iaf_holidays", { p_from: todayStr(), p_to: ymd(new Date(Date.now() + 30 * 86400000)) })), soft(rpc("iaf_holiday_alerts"))]).then(([mySch, myNotices, shiftIn, timeIn, shiftNews, shiftMine, hols, halert]) => {
       const box = document.getElementById("homeextra"); if (!box || tok !== navToken) return;
       const schedCard = mySch && mySch.linked && mySch.days.length ? `<div class="card mysched"><h3>My schedule</h3>${mySch.days.map((d, i) => `<div class="row${i === 0 ? " today" : ""}${d.rest ? " rest" : ""}"><span>${i === 0 ? "Today" : new Date(d.date + "T00:00:00").toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" })}</span><span>${esc(dayLine(d))}</span></div>`).join("")}${mySch.days[0].schedule ? `<p class="s">${esc(mySch.days[0].schedule)}</p>` : ""}</div>` : "";
       const shiftCard = Array.isArray(shiftIn) && shiftIn.length ? `<a class="notice" href="#/shift"><b>${shiftIn.length}</b> shift change request${shiftIn.length > 1 ? "s" : ""} waiting for your decision →</a>` : "";
       const timeCard = Array.isArray(timeIn) && timeIn.length ? `<a class="notice" href="#/time"><b>${timeIn.length}</b> half-day / undertime filing${timeIn.length > 1 ? "s" : ""} waiting for your decision →</a>` : "";
       const retCard = Array.isArray(shiftMine) && shiftMine.some((r) => r.mine && r.status === "returned") ? `<a class="notice" href="#/shift">A shift change you filed was returned to you for changes →</a>` : "";
       const newsCard = (Array.isArray(shiftNews) ? shiftNews : []).map((r) => `<div class="notice"><b>Shift change approved:</b> ${esc(r.schedule)} for ${esc(r.dept ? "department " + r.dept : r.people.slice(0, 3).join(", ") + (r.people.length > 3 ? " +" + (r.people.length - 3) : ""))}, from ${esc(r.start_date)}${r.end_date ? " to " + esc(r.end_date) : ""} <button class="link" data-newsseen="${esc(r.id)}">Got it</button></div>`).join("");
-      box.innerHTML = retCard + newsCard + shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + `<a class="btn block" href="#/shift">🔄 Change shift</a><a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>`;
+      const holAlert = halert && halert.proposed > 0 && state.canPeople ? `<a class="notice" href="#/holidays"><b>${halert.proposed}</b> holiday${halert.proposed > 1 ? "s" : ""} waiting for your confirmation →</a>` : "";
+      const holCard = Array.isArray(hols) && hols.length ? `<div class="card"><h3>Coming holidays</h3>${hols.slice(0, 4).map((h) => `<div class="row"><span>${esc(new Date(h.date + "T00:00:00").toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" }))}</span><span>${esc(h.name)}${h.kind === "special_working" ? " (work day)" : ""}</span></div>`).join("")}</div>` : "";
+      box.innerHTML = holAlert + retCard + newsCard + shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + holCard + `<a class="btn block" href="#/shift">🔄 Change shift</a><a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>`;
     });
   } catch (e) { el.innerHTML = errBox(e); }
 }
@@ -185,8 +188,18 @@ async function viewFile(tok) {
       if (f.type.value !== "VL") f.cov.checked = false;
     };
     f.days.addEventListener("input", () => (touchedDays = true));
-    ["start", "end", "type"].forEach((n) => f[n].addEventListener("change", () => { if (n !== "type") touchedDays = false; if (n === "start" && f.end.value < f.start.value) f.end.value = f.start.value; sync(); }));
-    sync();
+    // working days = the person's schedule minus rest days and holidays (the server counts the same way and refuses more)
+    let cseq = 0;
+    const count = async () => {
+      const s = f.start.value, e = f.end.value, my = ++cseq; if (!s || !e || e < s) return;
+      try { const c = await rpc("iaf_leave_count", { p_start: s, p_end: e }); if (my !== cseq) return;
+        if (!c.assumed) { f.days.max = Math.max(c.days, 0.5); if (!touchedDays) f.days.value = c.days || 0; }
+        const sk = (c.skipped || []).map((x) => `${new Date(x.date + "T00:00:00").toLocaleDateString("en-PH", { month: "short", day: "numeric" })} (${x.why})`);
+        document.getElementById("dayhint").textContent = `${c.days} working day${c.days === 1 ? "" : "s"}${c.assumed ? " (no schedule set yet — counted Mon–Fri)" : ""}${sk.length ? " · not counted: " + sk.join(", ") : ""}. Use 0.5 for a half day.`;
+      } catch {}
+    };
+    ["start", "end", "type"].forEach((n) => f[n].addEventListener("change", () => { if (n !== "type") touchedDays = false; if (n === "start" && f.end.value < f.start.value) f.end.value = f.start.value; sync(); if (n !== "type") count(); }));
+    sync(); count();
     f.addEventListener("submit", async (ev) => {
       ev.preventDefault(); const btn = f.querySelector("button[type=submit]"); btn.disabled = true; btn.textContent = "Submitting…";
       document.getElementById("ferr").innerHTML = "";
@@ -312,18 +325,21 @@ async function viewCalendar(tok) {
   const now = new Date(); calMonth ||= new Date(now.getFullYear(), now.getMonth(), 1);
   try {
     const first = calMonth, last = new Date(first.getFullYear(), first.getMonth() + 1, 0);
-    const rows = await rest(`vw_leave_calendar?start_date=lte.${ymd(last)}&end_date=gte.${ymd(first)}&select=full_name,leave_type_code,start_date,end_date,is_wfh&order=start_date`);
+    const [rows, hols0] = await Promise.all([rest(`vw_leave_calendar?start_date=lte.${ymd(last)}&end_date=gte.${ymd(first)}&select=full_name,leave_type_code,start_date,end_date,is_wfh&order=start_date`),
+      rpc("iaf_holidays", { p_from: ymd(first), p_to: ymd(last) }).catch(() => [])]);
     if (tok !== navToken) return;
+    const holBy = {}; (Array.isArray(hols0) ? hols0 : []).forEach((h) => (holBy[h.date] ||= []).push(h));
     const byDay = {};
     rows.forEach((r) => { for (let d = new Date(Math.max(pd(r.start_date), first)); d <= Math.min(pd(r.end_date), last); d.setDate(d.getDate() + 1)) (byDay[ymd(d)] ||= []).push(r); });
     const lead = first.getDay(); let cells = ["S", "M", "T", "W", "T", "F", "S"].map((d) => `<div class="dow">${d}</div>`).join("") + '<div></div>'.repeat(lead);
     for (let i = 1; i <= last.getDate(); i++) { const k = ymd(new Date(first.getFullYear(), first.getMonth(), i)); const n = byDay[k]?.length || 0;
-      cells += `<button class="day ${n ? "has" : ""} ${k === todayStr() ? "today" : ""}" data-day="${k}">${i}${n ? `<i>${n}</i>` : ""}</button>`; }
+      cells += `<button class="day ${n ? "has" : ""} ${holBy[k] ? "hol" : ""} ${k === todayStr() ? "today" : ""}" data-day="${k}"${holBy[k] ? ` title="${esc(holBy[k].map((h) => h.name).join(", "))}"` : ""}>${i}${n ? `<i>${n}</i>` : ""}</button>`; }
     el.innerHTML = `<div class="between mhead"><button class="btn sm" data-m="-1" aria-label="Previous month">‹</button><h2>${first.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</h2><button class="btn sm" data-m="1" aria-label="Next month">›</button></div>
       <div class="calwrap"><div class="calmain"><div class="grid">${cells}</div></div><aside id="dayinfo" class="list calside"></aside></div>`;
+    const holLine = (k) => (holBy[k] || []).map((h) => `<div class="alert warn">🎌 ${esc(h.name)}${h.kind === "special_working" ? " (work day)" : " — holiday"}</div>`).join("");
     const show = (k) => { document.getElementById("dayinfo").innerHTML = (byDay[k] || []).length
-      ? `<h3>${esc(fmtD(k))}</h3>` + byDay[k].map((r) => `<div class="row"><div class="av sm">${esc(initials(r.full_name))}</div><div class="grow"><div class="t">${esc(r.full_name)}</div><div class="s">${esc(r.leave_type_code)}${r.is_wfh ? " · WFH" : ""} · ${esc(fmtRange(r.start_date, r.end_date))}</div></div></div>`).join("")
-      : `<h3>${esc(fmtD(k))}</h3><div class="empty small">Nobody is out.</div>`; };
+      ? `<h3>${esc(fmtD(k))}</h3>` + holLine(k) + byDay[k].map((r) => `<div class="row"><div class="av sm">${esc(initials(r.full_name))}</div><div class="grow"><div class="t">${esc(r.full_name)}</div><div class="s">${esc(r.leave_type_code)}${r.is_wfh ? " · WFH" : ""} · ${esc(fmtRange(r.start_date, r.end_date))}</div></div></div>`).join("")
+      : `<h3>${esc(fmtD(k))}</h3>` + holLine(k) + `<div class="empty small">Nobody is out.</div>`; };
     show(todayStr().slice(0, 7) === ymd(first).slice(0, 7) ? todayStr() : ymd(first));
     el.onclick = (ev) => { const m = ev.target.closest("[data-m]"); if (m) { calMonth = new Date(first.getFullYear(), first.getMonth() + Number(m.dataset.m), 1); route(); return; }
       const d = ev.target.closest("[data-day]"); if (d) show(d.dataset.day); };
@@ -365,6 +381,12 @@ async function viewTimePage(tok) {
   const el = document.querySelector(".content"); if (tok !== navToken) return;
   await renderTime(el, { rpc, esc, toast, errBox });
 }
+async function viewHolidaysPage(tok) {
+  if (!state.canPeople) { location.replace("#/"); return; }
+  shell("holidays", "Holidays", loading(), true);
+  const el = document.querySelector(".content"); if (tok !== navToken) return;
+  await renderHolidays(el, { rpc, esc, toast, errBox, state });
+}
 async function viewOrgPage(tok) {
   if (!state.canPeople) { location.replace("#/"); return; }
   shell("org", "Org chart", loading(), true);
@@ -386,6 +408,7 @@ async function route() {
   if (p === "notices") return viewNoticesPage(tok);
   if (p === "shift") return viewShiftPage(tok);
   if (p === "time") return viewTimePage(tok);
+  if (p === "holidays") return viewHolidaysPage(tok);
   return viewHome(tok);
 }
 document.addEventListener("click", async (ev) => { $toast.className = "";

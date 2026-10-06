@@ -163,3 +163,5 @@ label.tick{display:inline-flex!important;flex-direction:row;align-items:center;g
 .twocol{display:grid;grid-template-columns:minmax(300px,420px) 1fr;gap:16px;align-items:start}.nrow{padding:8px 0;border-bottom:1px solid var(--line,#e5e7eb)}
 .egrid label[hidden]{display:none!important}
 .people{display:grid;gap:4px;max-height:220px;overflow:auto;margin:4px 0}.sreq{margin:8px 0}
+
+.day.hol{background:#fff4d6;border-color:#f0c96a}.hrow.dismissed{opacity:.55}.hrow{padding:8px 0;border-bottom:1px solid var(--line,#e5e7eb)}
