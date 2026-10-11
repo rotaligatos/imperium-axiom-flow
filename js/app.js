@@ -55,6 +55,7 @@ async function loadMe() {
   state.canPeople = state.isAdmin || hr;            // Employees page: administrators and people marked as HR staff
   state.canCoc = await rpc("iaf_coc_can_see").catch(() => false);   // Code of Conduct guide: supervisors and up, HR, admin
   state.irWaiting = await rpc("iaf_ir_waiting_count").catch(() => 0);
+  state.late = await rpc("iaf_leave_late_summary").catch(() => ({ can_see: false }));
   state.irAny = state.canCoc || state.irWaiting > 0 || ((await rpc("iaf_ir_list", { p_box: "all", p_employee: null, p_status: null, p_q: null }).catch(() => [])) || []).length > 0;
 }
 async function loadTypes() {
@@ -75,7 +76,7 @@ async function refreshBadge() {
 // ---------- shell ----------
 function shell(active, title, body, wide = false) {
   const nav = [["#/", "Home", "🏠", "home"], ["#/file", "File leave", "➕", "file"], ["#/requests", "My requests", "📄", "requests"],
-    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ["#/shift", "Change shift", "🔄", "shift"], ["#/time", "Half-day / Undertime", "⏱️", "time"], ["#/policies", "Policies & Memos", "📚", "policies"], ...(state.canCoc ? [["#/coc", "Code of Conduct", "⚖️", "coc"]] : []), ...(state.irAny ? [["#/ir", "Incident reports", "📝", "ir"]] : []), ["#/account", "Account", "👤", "account"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/credits", "Leave credits", "🧮", "credits"], ["#/org", "Org chart", "🗂️", "org"], ["#/schedules", "Schedules", "🕒", "schedules"], ["#/notices", "Notices", "📢", "notices"], ["#/holidays", "Holidays", "🎌", "holidays"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
+    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ["#/shift", "Change shift", "🔄", "shift"], ["#/time", "Half-day / Undertime", "⏱️", "time"], ["#/policies", "Policies & Memos", "📚", "policies"], ...(state.canCoc ? [["#/coc", "Code of Conduct", "⚖️", "coc"]] : []), ...(state.irAny ? [["#/ir", "Incident reports", "📝", "ir"]] : []), ...(state.late && state.late.can_see ? [["#/late", "Late leave filings", "⏰", "late"]] : []), ["#/account", "Account", "👤", "account"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/credits", "Leave credits", "🧮", "credits"], ["#/org", "Org chart", "🗂️", "org"], ["#/schedules", "Schedules", "🕒", "schedules"], ["#/notices", "Notices", "📢", "notices"], ["#/holidays", "Holidays", "🎌", "holidays"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
   const links = nav.map(([h, t, ic, k]) => `<a href="${h}" class="${active === k ? "on" : ""}" ${k === "approvals" ? 'data-approver-nav ' + (state.isApprover ? "" : "hidden") : ""}>
       <span class="ic" aria-hidden="true">${ic}</span><span>${t}</span>${k === "approvals" ? `<b class="badge" data-badge ${state.pending ? "" : "hidden"}>${state.pending}</b>` : ""}</a>`).join("");
   $app.innerHTML = `<div class="layout">
@@ -145,14 +146,15 @@ async function viewHome(tok) {
       const holAlert = halert && halert.proposed > 0 && state.canPeople ? `<a class="notice" href="#/holidays"><b>${halert.proposed}</b> holiday${halert.proposed > 1 ? "s" : ""} waiting for your confirmation →</a>` : "";
       const holCard = Array.isArray(hols) && hols.length ? `<div class="card"><h3>Coming holidays</h3>${hols.slice(0, 4).map((h) => `<div class="row"><span>${esc(new Date(h.date + "T00:00:00").toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" }))}</span><span>${esc(h.name)}${h.kind === "special_working" ? " (work day)" : ""}</span></div>`).join("")}</div>` : "";
       const irAlert = state.irWaiting > 0 ? `<a class="notice" href="#/ir"><b>${state.irWaiting}</b> incident report${state.irWaiting > 1 ? "s" : ""} waiting for you →</a>` : "";
-      box.innerHTML = irAlert + holAlert + retCard + newsCard + shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + holCard + `<a class="btn block" href="#/shift">🔄 Change shift</a><a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>`;
+      const lateAlert = state.late && state.late.can_see && state.late.recent > 0 ? `<a class="notice" href="#/late"><b>${state.late.recent}</b> late leave filing${state.late.recent > 1 ? "s" : ""} in the last 30 days →</a>` : "";
+      box.innerHTML = irAlert + lateAlert + holAlert + retCard + newsCard + shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + holCard + `<a class="btn block" href="#/shift">🔄 Change shift</a><a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>`;
     });
   } catch (e) { el.innerHTML = errBox(e); }
 }
 
 function reqRow(r, base = "#/requests/", activeId = null) {
   return `<a class="row${r.id === activeId ? " on" : ""}" href="${base}${esc(r.id)}"><div class="grow"><div class="t">${esc(r.leave_types?.display_name || "Leave")}${r.requester ? ` · ${esc(r.requester.full_name)}` : ""}</div>
-    <div class="s">${esc(fmtRange(r.start_date, r.end_date))} · ${num(r.days_requested)} day${Number(r.days_requested) === 1 ? "" : "s"}${r.vl_h1_over ? ` · <span class="warnt">past Jan–Jun half</span>` : ""}</div></div>${chip(r.status)}</a>`;
+    <div class="s">${esc(fmtRange(r.start_date, r.end_date))} · ${num(r.days_requested)} day${Number(r.days_requested) === 1 ? "" : "s"}${r.vl_h1_over ? ` · <span class="warnt">past Jan–Jun half</span>` : ""}${r.is_late ? ` · <span class="warnt">late filing</span>` : ""}</div></div>${chip(r.status)}</a>`;
 }
 
 // (viewRequests / viewApprovals are now viewSplit, below)
@@ -193,7 +195,7 @@ async function viewFile(tok) {
             <label class="check"><input type="radio" name="mkind" value="miscarriage"><span>Miscarriage / pregnancy loss</span></label>
             <label id="trrow">Days given to the child's father (0–7)<input type="number" name="transfer" min="0" max="7" step="1" value="0"></label></fieldset>`
         : c === "PATERNITY" ? `<label>Date of the delivery or miscarriage<input type="date" name="delivery"></label>`
-        : c === "WFH" ? `<label class="check"><input type="checkbox" name="wfhack"><span>I will send my work accomplishment report to my manager by the end of each working day (email or hard copy).</span></label>` : "";
+        : c === "VL" ? `<label class="check"><input type="checkbox" name="emerg"><span>Emergency leave — I told my supervisor and HR within the first hour of the working day (medical or family reason)</span></label>` : "";
       const cal = ty.day_basis === "calendar";
       f.days.readOnly = cal; f.days.step = cal ? "1" : "0.5";
       document.getElementById("rlabel").textContent = ty.confidential ? "Reason (only HR will see this)" : "Reason";
@@ -208,7 +210,7 @@ async function viewFile(tok) {
       if (c === "BEREAVEMENT") return { relationship: f.rel.value, deceased_name: f.deceased.value.trim() };
       if (c === "MATERNITY") { const k = (f.querySelector("input[name=mkind]:checked") || {}).value || "birth"; return { kind: k, transfer_days: k === "birth" ? Number(f.transfer.value || 0) : 0 }; }
       if (c === "PATERNITY") return { delivery_date: f.delivery.value || null };
-      if (c === "WFH") return { report_ack: !!f.wfhack.checked };
+      if (c === "VL") return f.emerg && f.emerg.checked ? { emergency: true } : null;
       return null;
     };
     const sync = () => {
@@ -285,8 +287,8 @@ async function viewSplit(tok, mode, id) {
   const listEl = document.getElementById("plist"), detEl = document.getElementById("pdetail");
   const base = `#/${mode}/`;
   const q = isAp
-    ? `leave_requests?current_approver_id=eq.${userId()}&status=in.(${PENDING_FOR_APPROVER.join(",")})&select=id,start_date,end_date,days_requested,status,vl_h1_over,leave_types(code,display_name),requester:users!requester_id(full_name)&order=created_at`
-    : `leave_requests?requester_id=eq.${userId()}&select=id,start_date,end_date,days_requested,status,vl_h1_over,leave_types(code,display_name)&order=created_at.desc&limit=100`;
+    ? `leave_requests?current_approver_id=eq.${userId()}&status=in.(${PENDING_FOR_APPROVER.join(",")})&select=id,start_date,end_date,days_requested,status,vl_h1_over,is_late,leave_types(code,display_name),requester:users!requester_id(full_name)&order=created_at`
+    : `leave_requests?requester_id=eq.${userId()}&select=id,start_date,end_date,days_requested,status,vl_h1_over,is_late,leave_types(code,display_name)&order=created_at.desc&limit=100`;
   const listP = rest(q).then((rows) => {
     if (tok !== navToken) return;
     if (isAp) { state.pending = rows.length; refreshBadge(); }
@@ -348,6 +350,8 @@ async function renderDetail(el, id, tok, mode) {
       ${(priv?.reason || r.reason) ? `<dt>Reason</dt><dd>${esc(priv?.reason || r.reason)}</dd>` : ""}${detailRows}
       ${r.is_vl_covering_sl ? `<dt>Note</dt><dd>VL covering exhausted SL (HR Manager approval required)</dd>` : ""}
       ${r.is_unpaid_loa_conversion ? `<dt>Note</dt><dd>Balance ran out — converted to unpaid leave</dd>` : ""}
+      ${r.is_late ? `<dt>Late filing</dt><dd class="warnt">${esc(r.late_note || "Filed later than the notice the policy asks for")}. Your manager and HR see it on the late filing list.</dd>` : ""}
+      ${r.detail && r.detail.emergency ? `<dt>Emergency</dt><dd>Emergency leave (told supervisor and HR within the first hour)</dd>` : ""}
       ${r.vl_h1_over ? `<dt>Note</dt><dd class="warnt">Uses more than half of the year's Vacation Leave before July 1 — this needs ${mine ? "your approver's" : "your"} approval (company policy: only half can be used January–June).</dd>` : ""}
       ${r.approver && PENDING_FOR_APPROVER.includes(r.status) ? `<dt>Waiting on</dt><dd>${esc(r.approver.full_name)}</dd>` : ""}</dl></div>
       <button class="btn block" data-act="pdf">Download form (PDF)</button>
@@ -497,6 +501,33 @@ async function viewIrPage(tok) {
   await renderIr(el, { rpc, esc, toast, errBox, state });
   state.irWaiting = await rpc("iaf_ir_waiting_count").catch(() => state.irWaiting);
 }
+async function viewLatePage(tok) {
+  if (!state.late || !state.late.can_see) { location.replace("#/"); return; }
+  shell("late", "Late leave filings", loading(), true);
+  const el = document.querySelector(".content"); if (tok !== navToken) return;
+  const now = new Date(), ym = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  let companies = [];
+  if (state.canPeople) companies = await rpc("iaf_my_companies").catch(() => []);
+  const st = { co: state.lateCo || state.late.company_id, month: state.lateMonth || ym(now) };
+  const load = async () => {
+    const [y, m] = st.month.split("-").map(Number), from = `${st.month}-01`;
+    const lastDay = `${st.month}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+    el.innerHTML = `${companies.length > 1 ? `<div class="cotabs">${companies.map((c) => `<button class="cotab${c.id === st.co ? " on" : ""}" data-co="${esc(c.id)}">${esc(c.short_code)}</button>`).join("")}</div>` : ""}
+      <div class="card"><div class="between"><p class="s">Leave filed later than the notice in memo HRMD-26-29 (VL: 1 day = 2 working days ahead, 2–3 days = 1 week, more than 3 days = 2 weeks, 1 week or longer = 1 month · Maternity 1 month · Birthday, Solo Parent, Paternity, RA 9710, WFH, Unpaid before the first day). Emergency VL, Sick Leave and Bereavement are not counted.</p>
+      <label>Month<input type="month" id="lmon" value="${esc(st.month)}"></label></div><div id="lrows">${loading()}</div></div>`;
+    try {
+      const r = await rpc("iaf_leave_late_list", { p_company: st.co, p_from: from, p_to: lastDay });
+      const rows = r.rows || [];
+      el.querySelector("#lrows").innerHTML = rows.length ? `<div class="tscroll"><table class="dtab"><tr><th>Filed</th><th>Employee</th><th>Department</th><th>Leave</th><th>Dates</th><th>Days</th><th>Rule missed</th><th>Status</th></tr>
+        ${rows.map((x) => `<tr><td>${esc(new Date(x.filed).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}</td><td>${esc(x.name)}${x.approver && ["PENDING_SUPERVISOR", "PENDING_MANAGER", "PENDING_HR_MANAGER"].includes(x.status) ? `<br><small>waiting on ${esc(x.approver)}</small>` : ""}</td><td>${esc(x.dept || "—")}</td><td>${esc(x.type)}</td>
+          <td>${esc(fmtRange(x.start_date, x.end_date))}</td><td>${num(x.days)}</td><td><small>${esc(x.rule || "")}</small></td><td>${chip(x.status)}</td></tr>`).join("")}</table></div>
+        <p class="s">${rows.length} late filing${rows.length > 1 ? "s" : ""}${r.hr ? " in the company" : " by people under you"}.</p>` : `<div class="empty">No late filings in this month.</div>`;
+    } catch (e) { el.querySelector("#lrows").innerHTML = errBox(e); }
+  };
+  el.onclick = (ev) => { const co = ev.target.closest("[data-co]"); if (co) { st.co = state.lateCo = co.dataset.co; load(); } };
+  el.onchange = (ev) => { if (ev.target.id === "lmon" && ev.target.value) { st.month = state.lateMonth = ev.target.value; load(); } };
+  await load();
+}
 async function viewCocPage(tok) {
   if (!state.canCoc) { location.replace("#/"); return; }
   shell("coc", "Code of Conduct", loading(), true);
@@ -541,6 +572,7 @@ async function route() {
   if (p === "policies") return viewPoliciesPage(tok);
   if (p === "coc") return viewCocPage(tok);
   if (p === "ir") return viewIrPage(tok);
+  if (p === "late") return viewLatePage(tok);
   if (p === "credits") return viewCreditsPage(tok);
   return viewHome(tok);
 }

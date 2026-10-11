@@ -11,6 +11,25 @@ const csv = (rows) => "﻿" + rows.map((r) => r.map(q).join(",")).join("\r\n") +
 
 export const templateCsv = () => csv([ORDER.map((k) => HEAD[k]), ORDER.map((k) => EX[k][0]), ORDER.map((k) => EX[k][1])]);
 export const exportCsv = (people) => csv([ORDER.map((k) => HEAD[k]), ...people.map((p) => ORDER.map((k) => p[k]))]);
+// Leave template: only the 201 fields the leave rules use, pre-filled with the company's active people (blank cells never erase).
+export const LEAVE_COLS = ["employee_no", "name", "position", "department", "hire_date", "sex", "birth_date", "civil_status", "employment_type", "regularization_date",
+  "solo_parent", "solo_verified", "spic_no", "spic_valid_until", "spouse_name", "marriage_cert_on_file", "prior_paternity_count"];
+export const LEAVE_GUIDE = [
+  ["Sex", "male / female", "Maternity, Paternity, RA 9710, RA 9262 are offered by sex", true],
+  ["Birth Date", "YYYY-MM-DD", "Birthday Leave (within the birth month)", true],
+  ["Civil Status", "single / married / widowed / separated / annulled", "Bereavement (who is covered), Paternity (married only)", true],
+  ["Employment Type", "regular / probationary / contractual / project_based", "Birthday, Bereavement and VL/SL credits are for regular employees", true],
+  ["Hire Date", "YYYY-MM-DD", "Years of service, Solo Parent and RA 9710 (6 months of service)", true],
+  ["Regularization Date", "YYYY-MM-DD", "First-year VL/SL credits are pro-rated from this date", false],
+  ["Solo Parent", "yes / no", "Solo Parent Leave, +15 maternity days, bereavement for a solo parent", false],
+  ["Solo Parent Verified By HR", "yes / no", "HR's tick: turns on Solo Parent Leave (needs Solo Parent = yes)", false],
+  ["SPIC No / SPIC Valid Until", "optional", "If a valid-until date is entered and passes, Solo Parent Leave stops", false],
+  ["Spouse Name / Marriage Cert On File", "text / yes", "Paternity Leave", false],
+  ["Prior Paternity Count", "0 to 4", "Paternity covers the first 4 deliveries (count those before the app)", false],
+];
+export const leaveMissing = (p) => [["sex", "sex"], ["birth_date", "birth date"], ["civil_status", "civil status"], ["employment_type", "employment type"], ["hire_date", "hire date"]]
+  .filter(([k]) => p[k] == null || p[k] === "").map(([, l]) => l).concat(p.employment_type === "regular" && !p.regularization_date ? ["regularization date"] : []);
+export const leaveTemplateCsv = (people) => csv([LEAVE_COLS.map((k) => HEAD[k]), ...people.filter((p) => (p.status || "active") === "active").map((p) => LEAVE_COLS.map((k) => p[k]))]);
 export const childrenTemplateCsv = () => csv([["Employee No", "Name", "Child Name", "Birth / Miscarriage Date", "Type", "Birth Cert On File"],
   ["E-001", "Dela Cruz, Juan", "Baby Uno", "2023-02-01", "birth", "yes"], ["E-001", "Dela Cruz, Juan", "", "2024-03-01", "miscarriage", ""]]);
 export const childrenExportCsv = (rows) => csv([["Employee No", "Name", "Child Name", "Birth / Miscarriage Date", "Type", "Birth Cert On File"],
@@ -46,8 +65,8 @@ export async function renderP201(box, empId, { rpc, esc, toast, errBox }) {
     ? `<label${WIDE.has(k) ? ' class="wide"' : ""}>${esc(label)}<select name="${k}">${opts.map(([o, t]) => `<option value="${o}"${o === val(k) ? " selected" : ""}>${esc(t)}</option>`).join("")}</select></label>`
     : `<label${WIDE.has(k) ? ' class="wide"' : ""}>${esc(label)}<input name="${k}" type="${type === "num" ? "number" : type}"${type === "num" ? ' step="0.5" min="0"' : ""} maxlength="300" value="${esc(val(k))}"></label>`;
   const verified = !!v.solo_verified_at;
-  const soloState = v.solo_parent === true ? `<div class="s">${verified ? `<span class="chip ok">✔ Verified by HR${d.verified_by_name ? ` — ${esc(d.verified_by_name)}` : ""}, ${esc(fmtD(String(v.solo_verified_at).slice(0, 10)))}</span>` : `<span class="chip warn">Not verified by HR yet</span>`}
-      ${d.can_verify ? `<label class="tick"><input type="checkbox" name="solo_verified"${verified ? " checked" : ""}> HR verified the SPIC${v.spic_valid_until ? ` (valid until ${esc(fmtD(v.spic_valid_until))})` : ""}</label>` : ""}</div>` : "";
+  const soloState = v.solo_parent === true || d.can_verify ? `<div class="s wide">${v.solo_parent === true ? (verified ? `<span class="chip ok">✔ Qualified solo parent — ticked by HR${d.verified_by_name ? ` (${esc(d.verified_by_name)})` : ""}, ${esc(fmtD(String(v.solo_verified_at).slice(0, 10)))}</span>` : `<span class="chip warn">Not ticked by HR yet — Solo Parent Leave is off</span>`) : ""}
+      ${d.can_verify ? `<label class="tick"><input type="checkbox" name="solo_verified"${verified ? " checked" : ""}> Qualified solo parent (HR checked the documents) — turns on Solo Parent Leave. Set “Solo parent” to Yes as well.</label>` : ""}</div>` : "";
   const kids = d.children || [];
   box.innerHTML = `<form class="form" data-p201form>
       ${GROUPS.map(([title, fs], i) => { const n = fs.filter(([k]) => val(k) !== "").length;
