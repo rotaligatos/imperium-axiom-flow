@@ -18,7 +18,7 @@ export async function renderPolicies(el, ctx) {
     <p class="s">${d.memo_no ? `<b>${esc(d.memo_no)}</b> · ` : ""}${esc(fmtD(d.issued_on))}${d.signatories ? ` · ${esc(d.signatories)}` : ""} · ${esc(d.company)}${d.status !== "active" ? ` · <b>${ST[d.status]}</b>` : ""}${d.visibility !== "everyone" ? ` · ${esc(VIS[d.visibility])}` : ""}</p>
     ${d.summary ? `<p>${esc(d.summary)}</p>` : ""}
     <div class="btns">${d.file_path ? `<button class="btn sm" data-open="${esc(d.file_path)}">📄 Open ${esc(d.file_name || "file")}</button>` : `<span class="s">No file attached yet.</span>`}
-      ${manage ? `<span class="only-desktop"> <button class="link" data-edit="${esc(d.id)}">Edit</button> <button class="link" data-up="${esc(d.id)}">${d.file_path ? "Replace file" : "Upload file"}</button>
+      ${manage ? `<span class="only-desktop"> <button class="btn sm primary" data-up="${esc(d.id)}">⬆ ${d.file_path ? "Replace PDF" : "Upload PDF"}</button> <button class="link" data-edit="${esc(d.id)}">Edit</button>
         ${d.status === "active" ? `<button class="link" data-st="superseded">Mark replaced</button> <button class="link" data-st="retired">Retire</button>` : `<button class="link" data-st="active">Bring back</button>`}</span>` : ""}</div></div>`;
   const e = q.edit === "new" ? {} : list.find((d) => d.id === q.edit);
   const form = manage && q.edit && (q.edit === "new" || e) ? `<div class="card only-desktop"><h3>${q.edit === "new" ? "Add a policy or memo" : "Edit"}</h3><form class="form" id="pform">
@@ -33,7 +33,7 @@ export async function renderPolicies(el, ctx) {
   el.innerHTML = `<div class="card"><div class="between"><div class="form" style="display:flex;gap:8px;flex-wrap:wrap"><input id="psearch" type="search" placeholder="Search memos…" value="${esc(q.search)}">
       <select id="pcat"><option value="">All categories</option>${CATS.map((c) => `<option ${q.cat === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
       ${manage ? `<button class="btn primary only-desktop" id="padd">Add</button>` : ""}</div>
-      ${manage ? `<p class="s only-mobile">Policies are added and edited on a computer.</p>` : ""}</div>
+      ${manage ? `<p class="s only-mobile">Uploading and editing memos is done on a computer (a wider screen).</p><p class="s only-desktop">To attach the memo file, press <b>⬆ Upload PDF</b> on the memo below (PDF or picture, up to 15 MB).</p>` : ""}</div>
     ${form}${list.length ? list.map(card).join("") : `<div class="empty">No policies or memos found.</div>`}`;
   let t; const s = el.querySelector("#psearch"); s.oninput = () => { clearTimeout(t); t = setTimeout(() => { q.search = s.value; reload(); }, 400); };
   el.querySelector("#pcat").onchange = (ev) => { q.cat = ev.target.value; reload(); };
