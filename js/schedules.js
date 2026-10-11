@@ -40,6 +40,7 @@ export async function renderSchedules(el, ctx) {
   const { rpc, esc, toast, errBox, state } = ctx;
   el.innerHTML = `<div class="empty">Loading…</div>`;
   let companies; try { companies = await rpc("iaf_my_companies"); } catch (e) { el.innerHTML = errBox(e); return; }
+  if (!companies || !companies.length) { el.innerHTML = `<div class="empty">No company available.</div>`; return; }
   const cur = companies.find((c) => c.id === state0.co) || companies.find((c) => c.id === state.empCompany) || companies[0]; state0.co = cur.id;
   let ov, lk; try { [ov, lk] = await Promise.all([rpc("iaf_schedule_overview", { p_company: cur.id }), rpc("iaf_org_lookups", { p_company: cur.id })]); } catch (e) { el.innerHTML = errBox(e); return; }
   const depts = lk.departments || [], name = Object.fromEntries(ov.schedules.map((s) => [s.id, s]));
@@ -87,7 +88,7 @@ export async function renderSchedules(el, ctx) {
   renderShiftHr(el.querySelector("#shr"), ctx, cur.id);
   renderTimeHr(el.querySelector("#thr"), ctx, cur.id);
   const af = el.querySelector("#aform"), syncScope = () => { el.querySelector("#tdept").hidden = af.scope.value !== "department"; el.querySelector("#temp").hidden = af.scope.value !== "employee"; };
-  af.scope.onchange = syncScope; syncScope(); af.from.value = new Date().toISOString().slice(0, 10);
+  af.scope.onchange = syncScope; syncScope(); af.from.value = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   af.onsubmit = async (ev) => { ev.preventDefault(); const err = af.querySelector(".eerr"); err.innerHTML = ""; const btn = af.querySelector("button[type=submit]"); btn.disabled = true;
     try { const sc = af.scope.value; await rpc("iaf_schedule_assign", { p_company: cur.id, p_scope: sc, p_target: sc === "department" ? af.dept.value : sc === "employee" ? af.emp.value : null, p_schedule: af.sch.value, p_from: af.from.value, p_to: af.to.value || null, p_note: af.note.value.trim() || null });
       toast("Assigned ✔"); reload(); } catch (e) { err.innerHTML = errBox(e); btn.disabled = false; } };

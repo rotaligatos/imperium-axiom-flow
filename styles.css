@@ -212,3 +212,22 @@ label.tick{display:inline-flex!important;flex-direction:row;align-items:center;g
 .list.pick{max-height:260px;overflow:auto;margin-bottom:8px}
 
 .natgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 14px}@media(min-width:860px){.natgrid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+
+/* grouped menu (update 39) */
+.ngroup{display:flex;flex-direction:column;gap:2px;margin-top:6px}
+.ngroup .nh{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;opacity:.65;padding:6px 12px 2px}
+.side .ngroup .nh{color:#cfe3f6}
+.sheet{position:fixed;inset:0;background:rgba(10,25,40,.45);z-index:20;display:flex;align-items:flex-end}
+.sheet[hidden]{display:none}
+.sheetin{background:var(--card);width:100%;max-height:85vh;overflow-y:auto;border-radius:16px 16px 0 0;padding:14px 16px calc(14px + var(--sab))}
+.sheetnav{display:flex;flex-direction:column}
+.sheetnav a{display:flex;gap:12px;align-items:center;padding:11px 8px;border-radius:10px;color:var(--ink)}
+.sheetnav a.on{background:var(--bg);font-weight:600}
+.sheetnav .ngroup .nh{color:var(--mute)}
+.sheetnav .badge{margin-left:auto}
+.previewbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 16px}@media(min-width:860px){.previewbar{margin:8px 28px}}
+.menuprev{border:1px solid var(--line);border-radius:12px;padding:6px;margin:8px 0}
+.menuprev .mi{display:block;padding:6px 10px;color:var(--ink)}
+.split2{display:grid;gap:12px}@media(min-width:860px){.split2{grid-template-columns:minmax(0,1fr) minmax(0,1.3fr)}}
+
+dl.stack{display:block}dl.stack dt{font-weight:600;color:var(--ink);margin-top:8px}dl.stack dd{margin:2px 0 0;color:var(--mute)}

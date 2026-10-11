@@ -61,10 +61,11 @@ export async function renderTime(el, ctx) {
     const k = f.kind.value;
     f.querySelectorAll("[data-for]").forEach((l) => { l.hidden = l.dataset.for !== k || (l.hasAttribute("data-tick") && f.upart.value !== "am"); });
   };
+  let pseq = 0;
   const preview = async () => {
-    const box = el.querySelector("#tprev"); box.textContent = "";
+    const box = el.querySelector("#tprev"); box.textContent = ""; const my = ++pseq;
     if (!f.date.value) return;
-    try { const d = await rpc("iaf_time_adj_preview", { p_emp: f.emp.value, p_date: f.date.value });
+    try { const d = await rpc("iaf_time_adj_preview", { p_emp: f.emp.value, p_date: f.date.value }); if (my !== pseq) return;
       box.textContent = d.state === "unset" ? "No schedule is set for this person." : d.state === "rest" ? `Rest day (${d.schedule}).` : `${d.schedule}: ${t12(d.start)} – ${t12(d.end)}${d.kind === "shift" ? " (shift – half-day not allowed)" : ""}${d.vl_left != null || d.sl_left != null ? ` · Left: VL ${d.vl_left ?? "–"}, SL ${d.sl_left ?? "–"}` : ""}`;
     } catch (e) { box.textContent = ""; }
   };
