@@ -9,6 +9,7 @@ import { renderTime } from "./timeadj.js";
 import { renderHolidays } from "./holidays.js";
 import { renderPolicies } from "./policies.js";
 import { renderCredits } from "./credits.js";
+import { renderCoc } from "./coc.js";
 import { mountPad, pngToPdfImage } from "./sigpad.js";
 import { sign, registerDevice, myDevices, canSign } from "./sign.js";
 import { isConfigured, getSession, userId, signIn, signOut, rest, rpc } from "./api.js";
@@ -51,6 +52,7 @@ async function loadMe() {
   state.isAdmin = (await rest("iaf_admins?select=user_id").catch(() => [])).length > 0;
   const hr = (await rest("iaf_hr_staff?select=user_id").catch(() => [])).length > 0;
   state.canPeople = state.isAdmin || hr;            // Employees page: administrators and people marked as HR staff
+  state.canCoc = await rpc("iaf_coc_can_see").catch(() => false);   // Code of Conduct guide: supervisors and up, HR, admin
 }
 async function loadTypes() {
   if (!state.types) state.types = await rest("leave_types?is_active=eq.true&select=id,code,display_name,tracks_balance&order=display_name");
@@ -70,7 +72,7 @@ async function refreshBadge() {
 // ---------- shell ----------
 function shell(active, title, body, wide = false) {
   const nav = [["#/", "Home", "🏠", "home"], ["#/file", "File leave", "➕", "file"], ["#/requests", "My requests", "📄", "requests"],
-    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ["#/shift", "Change shift", "🔄", "shift"], ["#/time", "Half-day / Undertime", "⏱️", "time"], ["#/policies", "Policies & Memos", "📚", "policies"], ["#/account", "Account", "👤", "account"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/credits", "Leave credits", "🧮", "credits"], ["#/org", "Org chart", "🗂️", "org"], ["#/schedules", "Schedules", "🕒", "schedules"], ["#/notices", "Notices", "📢", "notices"], ["#/holidays", "Holidays", "🎌", "holidays"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
+    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ["#/shift", "Change shift", "🔄", "shift"], ["#/time", "Half-day / Undertime", "⏱️", "time"], ["#/policies", "Policies & Memos", "📚", "policies"], ...(state.canCoc ? [["#/coc", "Code of Conduct", "⚖️", "coc"]] : []), ["#/account", "Account", "👤", "account"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/credits", "Leave credits", "🧮", "credits"], ["#/org", "Org chart", "🗂️", "org"], ["#/schedules", "Schedules", "🕒", "schedules"], ["#/notices", "Notices", "📢", "notices"], ["#/holidays", "Holidays", "🎌", "holidays"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
   const links = nav.map(([h, t, ic, k]) => `<a href="${h}" class="${active === k ? "on" : ""}" ${k === "approvals" ? 'data-approver-nav ' + (state.isApprover ? "" : "hidden") : ""}>
       <span class="ic" aria-hidden="true">${ic}</span><span>${t}</span>${k === "approvals" ? `<b class="badge" data-badge ${state.pending ? "" : "hidden"}>${state.pending}</b>` : ""}</a>`).join("");
   $app.innerHTML = `<div class="layout">
@@ -483,6 +485,12 @@ async function viewPoliciesPage(tok) {
   const el = document.querySelector(".content"); if (tok !== navToken) return;
   await renderPolicies(el, { rpc, esc, toast, errBox, state });
 }
+async function viewCocPage(tok) {
+  if (!state.canCoc) { location.replace("#/"); return; }
+  shell("coc", "Code of Conduct", loading(), true);
+  const el = document.querySelector(".content"); if (tok !== navToken) return;
+  await renderCoc(el, { rpc, esc, toast, errBox, state });
+}
 async function viewCreditsPage(tok) {
   if (!state.canPeople) { location.replace("#/"); return; }
   shell("credits", "Leave credits", loading(), true);
@@ -519,6 +527,7 @@ async function route() {
   if (p === "holidays") return viewHolidaysPage(tok);
   if (p === "account") return viewAccount(tok);
   if (p === "policies") return viewPoliciesPage(tok);
+  if (p === "coc") return viewCocPage(tok);
   if (p === "credits") return viewCreditsPage(tok);
   return viewHome(tok);
 }
