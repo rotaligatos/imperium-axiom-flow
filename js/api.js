@@ -77,3 +77,16 @@ async function storageCall(path, init = {}) {
 }
 export const storageUpload = (bucket, path, file) => storageCall(`object/${bucket}/${path}`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream", "x-upsert": "true" }, body: file });
 export const storageBlob = async (bucket, path) => (await storageCall(`object/authenticated/${bucket}/${path}`)).blob();
+
+// ---- Edge Functions (server-side helpers such as the AI memo reader). Runs as the signed-in user. ----
+export async function fnCall(name, body, timeoutMs = 120000) {
+  if (!session) throw Object.assign(new Error("Please sign in."), { status: 401 });
+  if (session.expires_at - Date.now() / 1000 < 60) await refresh();
+  const ac = new AbortController(), timer = setTimeout(() => ac.abort(), timeoutMs);
+  const res = await fetch(`${cfg.SUPABASE_URL}/functions/v1/${name}`, { method: "POST", signal: ac.signal,
+    headers: { apikey: cfg.SUPABASE_ANON_KEY, Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body) }).catch((e) => { throw e.name === "AbortError" ? new Error("This is taking too long. Please try again.") : e; }).finally(() => clearTimeout(timer));
+  let out = null; try { out = await res.json(); } catch {}
+  if (!res.ok) throw new Error(out?.error || `Request failed (${res.status})`);
+  return out;
+}
