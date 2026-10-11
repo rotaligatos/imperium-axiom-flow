@@ -7,6 +7,8 @@ import { renderNotices, noticesHtml } from "./announcements.js";
 import { renderShift } from "./shift.js";
 import { renderTime } from "./timeadj.js";
 import { renderHolidays } from "./holidays.js";
+import { renderPolicies } from "./policies.js";
+import { renderCredits } from "./credits.js";
 import { mountPad, pngToPdfImage } from "./sigpad.js";
 import { sign, registerDevice, myDevices, canSign } from "./sign.js";
 import { isConfigured, getSession, userId, signIn, signOut, rest, rpc } from "./api.js";
@@ -68,7 +70,7 @@ async function refreshBadge() {
 // ---------- shell ----------
 function shell(active, title, body, wide = false) {
   const nav = [["#/", "Home", "🏠", "home"], ["#/file", "File leave", "➕", "file"], ["#/requests", "My requests", "📄", "requests"],
-    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ["#/shift", "Change shift", "🔄", "shift"], ["#/time", "Half-day / Undertime", "⏱️", "time"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/org", "Org chart", "🗂️", "org"], ["#/schedules", "Schedules", "🕒", "schedules"], ["#/notices", "Notices", "📢", "notices"], ["#/holidays", "Holidays", "🎌", "holidays"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
+    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ["#/shift", "Change shift", "🔄", "shift"], ["#/time", "Half-day / Undertime", "⏱️", "time"], ["#/policies", "Policies & Memos", "📚", "policies"], ["#/account", "Account", "👤", "account"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/credits", "Leave credits", "🧮", "credits"], ["#/org", "Org chart", "🗂️", "org"], ["#/schedules", "Schedules", "🕒", "schedules"], ["#/notices", "Notices", "📢", "notices"], ["#/holidays", "Holidays", "🎌", "holidays"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
   const links = nav.map(([h, t, ic, k]) => `<a href="${h}" class="${active === k ? "on" : ""}" ${k === "approvals" ? 'data-approver-nav ' + (state.isApprover ? "" : "hidden") : ""}>
       <span class="ic" aria-hidden="true">${ic}</span><span>${t}</span>${k === "approvals" ? `<b class="badge" data-badge ${state.pending ? "" : "hidden"}>${state.pending}</b>` : ""}</a>`).join("");
   $app.innerHTML = `<div class="layout">
@@ -106,11 +108,9 @@ async function viewHome(tok) {
   shell("home", `Hello, ${(state.me.full_name || "").split(" ")[0]}`, loading());
   const el = document.querySelector(".content");
   try {
-    const [bal, reqs, devs, myImg] = await Promise.all([
+    const [bal, reqs] = await Promise.all([
       rest(`vw_leave_balances_live?user_id=eq.${userId()}&year=eq.${YEAR}&select=leave_type_code,total_allotment,used,remaining`),
-      rest(`leave_requests?requester_id=eq.${userId()}&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name)&order=created_at.desc&limit=5`),
-      myDevices().catch(() => []),
-      rest(`iaf_signature_images?user_id=eq.${userId()}&select=png_base64`).catch(() => []) ]);
+      rest(`leave_requests?requester_id=eq.${userId()}&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name)&order=created_at.desc&limit=5`) ]);
     if (tok !== navToken) return;
     const cards = ["VL", "SL"].map((c) => {
       const b = bal.find((x) => x.leave_type_code === c);
@@ -118,28 +118,18 @@ async function viewHome(tok) {
       if (!b) return `<div class="bal"><div class="bn">${name}</div><div class="bv">—</div><div class="bs">No ${YEAR} balance set up yet</div></div>`;
       const pct = Number(b.total_allotment) ? Math.max(0, Math.min(100, (Number(b.remaining) / Number(b.total_allotment)) * 100)) : 0;
       return `<div class="bal"><div class="bn">${name}</div><div class="bv">${num(b.remaining)}<small> days left</small></div>
-        <div class="bar"><i style="width:${pct}%"></i></div><div class="bs">${num(b.used)} used of ${num(b.total_allotment)} in ${YEAR}</div></div>`; }).join("");
+        <div class="bar"><i style="width:${pct}%"></i></div><div class="bs">${num(b.used)} used of ${num(b.total_allotment)} in ${YEAR}</div>${c === "VL" ? `<div class="bs h1" id="vlh1"></div>` : ""}</div>`; }).join("");
     const recent = reqs.length ? reqs.map((r) => reqRow(r)).join("") : `<div class="empty">No requests yet.</div>`;
     el.innerHTML = `<div id="homeextra"></div><div class="bals">${cards}</div>
       <a class="btn primary block" href="#/file">➕ File a leave</a>
       ${state.pending ? `<a class="notice" href="#/approvals"><b>${state.pending}</b> request${state.pending > 1 ? "s" : ""} waiting for your decision →</a>` : ""}
       <h2>Recent requests</h2><div class="list">${recent}</div>
-      ${reqs.length ? `<a class="link" href="#/requests">See all →</a>` : ""}
-      <div class="card"><h3>My signature</h3>
-        <p class="s">${devs.length ? `✔ Device set up (${esc(devs.map((d) => d.label || "Device").join(", "))}). You sign with your fingerprint, face or device PIN.`
-          : "Step 1 — set up this device so your fingerprint, face or PIN can be your signature."}</p>
-        ${devs.length ? `<button class="link" data-act="reg-device">Add another device</button>` : `<button class="btn block" data-act="reg-device">Set up this device</button>`}
-        <p class="s" style="margin-top:14px">${myImg[0] ? "✔ Your drawn signature (shown on the printed form):" : "Step 2 — draw your signature. It appears on your leave forms once you file or approve."}</p>
-        ${myImg[0] ? `<div class="sigprev"><img alt="Your signature" src="data:image/png;base64,${esc(myImg[0].png_base64)}"></div>` : ""}
-        <div id="padhost"></div>
-        <button class="btn block" data-act="draw-sig">${myImg[0] ? "Change signature" : "Draw my signature"}</button></div>`;
-    el.querySelectorAll("[data-act=reg-device]").forEach((rb) => (rb.onclick = async (ev) => { const b = ev.currentTarget; b.disabled = true;
-      try { await registerDevice(state.me?.full_name); toast("This device is set up ✔"); route(); 
-  } catch (e) { toast(e.message || "Could not set up this device", true); b.disabled = false; } }));
-    el.querySelector("[data-act=draw-sig]").onclick = (ev) => { ev.currentTarget.hidden = true;
-      mountPad(el.querySelector("#padhost"), { onCancel: () => route(), onSave: async (png) => { await rpc("iaf_signature_image_save", { p_png_base64: png }); toast("Signature saved ✔"); route(); } }); };
+      ${reqs.length ? `<a class="link" href="#/requests">See all →</a>` : ""}`;
     // Extras never block the Home screen: a slow or failing call just leaves that card out.
     const soft = (pr, ms = 8000) => Promise.race([pr, new Promise((r) => setTimeout(() => r(null), ms))]).catch(() => null);
+    soft(rpc("iaf_my_leave_summary", { p_year: YEAR })).then((sm) => { const h = sm?.vl_first_half, box = document.getElementById("vlh1");
+      if (!h || !box || tok !== navToken || new Date().getMonth() > 5) return;
+      box.textContent = `Until June 30: ${num(h.left)} of ${num(h.cap)} days left to use (half of your VL). More needs approval.`; });
     Promise.all([soft(rpc("iaf_my_schedule", { p_days: 7 })), soft(rpc("iaf_my_announcements")), soft(rpc("iaf_shift_change_inbox")), soft(rpc("iaf_time_adj_inbox")), soft(rpc("iaf_shift_change_news")), soft(rpc("iaf_shift_change_mine")), soft(rpc("iaf_holidays", { p_from: todayStr(), p_to: ymd(new Date(Date.now() + 30 * 86400000)) })), soft(rpc("iaf_holiday_alerts"))]).then(([mySch, myNotices, shiftIn, timeIn, shiftNews, shiftMine, hols, halert]) => {
       const box = document.getElementById("homeextra"); if (!box || tok !== navToken) return;
       const schedCard = mySch && mySch.linked && mySch.days.length ? `<div class="card mysched"><h3>My schedule</h3>${mySch.days.map((d, i) => `<div class="row${i === 0 ? " today" : ""}${d.rest ? " rest" : ""}"><span>${i === 0 ? "Today" : new Date(d.date + "T00:00:00").toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" })}</span><span>${esc(dayLine(d))}</span></div>`).join("")}${mySch.days[0].schedule ? `<p class="s">${esc(mySch.days[0].schedule)}</p>` : ""}</div>` : "";
@@ -156,7 +146,7 @@ async function viewHome(tok) {
 
 function reqRow(r, base = "#/requests/", activeId = null) {
   return `<a class="row${r.id === activeId ? " on" : ""}" href="${base}${esc(r.id)}"><div class="grow"><div class="t">${esc(r.leave_types?.display_name || "Leave")}${r.requester ? ` · ${esc(r.requester.full_name)}` : ""}</div>
-    <div class="s">${esc(fmtRange(r.start_date, r.end_date))} · ${num(r.days_requested)} day${Number(r.days_requested) === 1 ? "" : "s"}</div></div>${chip(r.status)}</a>`;
+    <div class="s">${esc(fmtRange(r.start_date, r.end_date))} · ${num(r.days_requested)} day${Number(r.days_requested) === 1 ? "" : "s"}${r.vl_h1_over ? ` · <span class="warnt">past Jan–Jun half</span>` : ""}</div></div>${chip(r.status)}</a>`;
 }
 
 // (viewRequests / viewApprovals are now viewSplit, below)
@@ -175,8 +165,8 @@ async function viewFile(tok) {
         <small id="dayhint"></small></label>
       <label><span>Reason</span><textarea name="reason" rows="3" maxlength="500" minlength="3" required placeholder="Tell your approver why you are filing this leave"></textarea></label>
       <label class="check" id="covrow" hidden><input type="checkbox" name="cov"><span>Use my Vacation Leave to cover an exhausted Sick Leave<small>This needs extra approval from the HR Manager.</small></span></label>
-      <div id="ferr"></div><button class="btn primary block" type="submit">Sign &amp; submit</button><p class="s" style="text-align:center">Your fingerprint, face or device PIN is your signature on the form.</p>
-      <p class="fine">Your request goes to your approver automatically. You'll see its progress under “My requests”.</p></form>`;
+      <div id="h1warn"></div><div id="ferr"></div><button class="btn primary block" type="submit">Sign &amp; submit</button><p class="s" style="text-align:center">Your fingerprint, face or device PIN is your signature on the form.</p>
+      <p class="fine">Your request goes to your approver automatically. You'll see its progress under “My requests”. <a href="#/policies">Leave rules &amp; memos →</a></p></form>`;
     const f = document.getElementById("ff");
     let touchedDays = false;
     const sync = () => {
@@ -198,8 +188,16 @@ async function viewFile(tok) {
         document.getElementById("dayhint").textContent = `${c.days} working day${c.days === 1 ? "" : "s"}${c.assumed ? " (no schedule set yet — counted Mon–Fri)" : ""}${sk.length ? " · not counted: " + sk.join(", ") : ""}. Use 0.5 for a half day.`;
       } catch {}
     };
-    ["start", "end", "type"].forEach((n) => f[n].addEventListener("change", () => { if (n !== "type") touchedDays = false; if (n === "start" && f.end.value < f.start.value) f.end.value = f.start.value; sync(); if (n !== "type") count(); }));
-    sync(); count();
+    // January–June: only half of the year's VL; more is allowed but needs the approver's approval
+    let hseq = 0;
+    const half = async () => { const box = document.getElementById("h1warn"), my = ++hseq; box.innerHTML = "";
+      if (f.type.value !== "VL" || !f.start.value || !f.end.value || f.end.value < f.start.value || !Number(f.days.value)) return;
+      try { const h = await rpc("iaf_leave_vl_h1_preview", { p_start: f.start.value, p_end: f.end.value, p_days: Number(f.days.value) }); if (my !== hseq) return;
+        if (h && h.applies && Number(h.over) > 0) box.innerHTML = `<div class="alert warn">From January to June only half of your Vacation Leave can be used (${num(h.cap)} of ${num(h.total)} days; ${num(h.left)} left). ${num(h.over)} day${Number(h.over) === 1 ? "" : "s"} of this request go${Number(h.over) === 1 ? "es" : ""} past that, so your approver will see it marked as needing approval.</div>`;
+      } catch {} };
+    ["start", "end", "type"].forEach((n) => f[n].addEventListener("change", () => { if (n !== "type") touchedDays = false; if (n === "start" && f.end.value < f.start.value) f.end.value = f.start.value; sync(); if (n !== "type") count().then(half); else half(); }));
+    f.days.addEventListener("change", half);
+    sync(); count().then(half);
     f.addEventListener("submit", async (ev) => {
       ev.preventDefault(); const btn = f.querySelector("button[type=submit]"); btn.disabled = true; btn.textContent = "Submitting…";
       document.getElementById("ferr").innerHTML = "";
@@ -227,8 +225,8 @@ async function viewSplit(tok, mode, id) {
   const listEl = document.getElementById("plist"), detEl = document.getElementById("pdetail");
   const base = `#/${mode}/`;
   const q = isAp
-    ? `leave_requests?current_approver_id=eq.${userId()}&status=in.(${PENDING_FOR_APPROVER.join(",")})&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name),requester:users!requester_id(full_name)&order=created_at`
-    : `leave_requests?requester_id=eq.${userId()}&select=id,start_date,end_date,days_requested,status,leave_types(code,display_name)&order=created_at.desc&limit=100`;
+    ? `leave_requests?current_approver_id=eq.${userId()}&status=in.(${PENDING_FOR_APPROVER.join(",")})&select=id,start_date,end_date,days_requested,status,vl_h1_over,leave_types(code,display_name),requester:users!requester_id(full_name)&order=created_at`
+    : `leave_requests?requester_id=eq.${userId()}&select=id,start_date,end_date,days_requested,status,vl_h1_over,leave_types(code,display_name)&order=created_at.desc&limit=100`;
   const listP = rest(q).then((rows) => {
     if (tok !== navToken) return;
     if (isAp) { state.pending = rows.length; refreshBadge(); }
@@ -275,6 +273,7 @@ async function renderDetail(el, id, tok, mode) {
       ${r.reason ? `<dt>Reason</dt><dd>${esc(r.reason)}</dd>` : ""}
       ${r.is_vl_covering_sl ? `<dt>Note</dt><dd>VL covering exhausted SL (HR Manager approval required)</dd>` : ""}
       ${r.is_unpaid_loa_conversion ? `<dt>Note</dt><dd>Balance ran out — converted to unpaid leave</dd>` : ""}
+      ${r.vl_h1_over ? `<dt>Note</dt><dd class="warnt">Uses more than half of the year's Vacation Leave before July 1 — this needs ${mine ? "your approver's" : "your"} approval (company policy: only half can be used January–June).</dd>` : ""}
       ${r.approver && PENDING_FOR_APPROVER.includes(r.status) ? `<dt>Waiting on</dt><dd>${esc(r.approver.full_name)}</dd>` : ""}</dl></div>
       <button class="btn block" data-act="pdf">Download form (PDF)</button>
       ${actions}<h3>History</h3>${tl ? `<ol class="tl">${tl}</ol>` : `<div class="empty small">No decisions yet.</div>`}`;
@@ -381,6 +380,39 @@ async function viewTimePage(tok) {
   const el = document.querySelector(".content"); if (tok !== navToken) return;
   await renderTime(el, { rpc, esc, toast, errBox });
 }
+async function viewAccount(tok) {
+  shell("account", "Account", loading());
+  const el = document.querySelector(".content");
+  try {
+    const [devs, myImg] = await Promise.all([myDevices().catch(() => []), rest(`iaf_signature_images?user_id=eq.${userId()}&select=png_base64`).catch(() => [])]);
+    if (tok !== navToken) return;
+    el.innerHTML = `<div class="card"><h3>${esc(state.me?.full_name || "")}</h3><p class="s">${esc(getSession()?.user?.email || "")}</p></div>
+      <div class="card"><h3>My signature</h3>
+        <p class="s">${devs.length ? `✔ Device set up (${esc(devs.map((d) => d.label || "Device").join(", "))}). You sign with your fingerprint, face or device PIN.`
+          : "Step 1 — set up this device so your fingerprint, face or PIN can be your signature."}</p>
+        ${devs.length ? `<button class="link" data-act="reg-device">Add another device</button>` : `<button class="btn block" data-act="reg-device">Set up this device</button>`}
+        <p class="s" style="margin-top:14px">${myImg[0] ? "✔ Your drawn signature (shown on the printed form):" : "Step 2 — draw your signature. It appears on your leave forms once you file or approve."}</p>
+        ${myImg[0] ? `<div class="sigprev"><img alt="Your signature" src="data:image/png;base64,${esc(myImg[0].png_base64)}"></div>` : ""}
+        <div id="padhost"></div>
+        <button class="btn block" data-act="draw-sig">${myImg[0] ? "Change signature" : "Draw my signature"}</button></div>`;
+    el.querySelectorAll("[data-act=reg-device]").forEach((rb) => (rb.onclick = async (ev) => { const b = ev.currentTarget; b.disabled = true;
+      try { await registerDevice(state.me?.full_name); toast("This device is set up ✔"); route();
+      } catch (e) { toast(e.message || "Could not set up this device", true); b.disabled = false; } }));
+    el.querySelector("[data-act=draw-sig]").onclick = (ev) => { ev.currentTarget.hidden = true;
+      mountPad(el.querySelector("#padhost"), { onCancel: () => route(), onSave: async (png) => { await rpc("iaf_signature_image_save", { p_png_base64: png }); toast("Signature saved ✔"); route(); } }); };
+  } catch (e) { if (tok === navToken) el.innerHTML = errBox(e); }
+}
+async function viewPoliciesPage(tok) {
+  shell("policies", "Policies & Memos", loading(), true);
+  const el = document.querySelector(".content"); if (tok !== navToken) return;
+  await renderPolicies(el, { rpc, esc, toast, errBox, state });
+}
+async function viewCreditsPage(tok) {
+  if (!state.canPeople) { location.replace("#/"); return; }
+  shell("credits", "Leave credits", loading(), true);
+  const el = document.querySelector(".content"); if (tok !== navToken) return;
+  await renderCredits(el, { rpc, esc, toast, errBox, state });
+}
 async function viewHolidaysPage(tok) {
   if (!state.canPeople) { location.replace("#/"); return; }
   shell("holidays", "Holidays", loading(), true);
@@ -409,6 +441,9 @@ async function route() {
   if (p === "shift") return viewShiftPage(tok);
   if (p === "time") return viewTimePage(tok);
   if (p === "holidays") return viewHolidaysPage(tok);
+  if (p === "account") return viewAccount(tok);
+  if (p === "policies") return viewPoliciesPage(tok);
+  if (p === "credits") return viewCreditsPage(tok);
   return viewHome(tok);
 }
 document.addEventListener("click", async (ev) => { $toast.className = "";

@@ -66,3 +66,14 @@ export async function rest(path, { method = "GET", body, headers = {} } = {}, re
   return parse(res);
 }
 export const rpc = (name, args) => rest(`rpc/${name}`, { method: "POST", body: args });
+
+// ---- private file storage (memo PDFs). Reads/writes are checked by storage policies in the database. ----
+async function storageCall(path, init = {}) {
+  if (!session) throw Object.assign(new Error("Please sign in."), { status: 401 });
+  if (session.expires_at - Date.now() / 1000 < 60) await refresh();
+  const res = await fetch(`${cfg.SUPABASE_URL}/storage/v1/${path}`, { ...init, headers: { apikey: cfg.SUPABASE_ANON_KEY, Authorization: `Bearer ${session.access_token}`, ...(init.headers || {}) } });
+  if (!res.ok) { let m = `Request failed (${res.status})`; try { const b = await res.json(); m = b.message || b.error || m; } catch {} throw new Error(m); }
+  return res;
+}
+export const storageUpload = (bucket, path, file) => storageCall(`object/${bucket}/${path}`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream", "x-upsert": "true" }, body: file });
+export const storageBlob = async (bucket, path) => (await storageCall(`object/authenticated/${bucket}/${path}`)).blob();

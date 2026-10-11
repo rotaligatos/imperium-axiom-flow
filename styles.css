@@ -165,3 +165,9 @@ label.tick{display:inline-flex!important;flex-direction:row;align-items:center;g
 .people{display:grid;gap:4px;max-height:220px;overflow:auto;margin:4px 0}.sreq{margin:8px 0}
 
 .day.hol{background:#fff4d6;border-color:#f0c96a}.hrow.dismissed{opacity:.55}.hrow{padding:8px 0;border-bottom:1px solid var(--line,#e5e7eb)}
+
+/* update 27: policies, account, leave credits */
+.pol h3{margin:0}.pol p{margin:6px 0}.dim{opacity:.6}.warnt{color:var(--warn,#9a6700);font-weight:600}
+.tscroll{overflow:auto;max-width:100%}.tscroll .dtab{min-width:100%}.tscroll .dtab tr{border-bottom:1px solid var(--line,#e5e7eb)}.tscroll .dtab th{position:sticky;top:0;background:var(--card,#fff)}
+.bal .h1{margin-top:4px;font-size:.78rem}
+@media(min-width:860px){.side nav{flex:1 1 auto;min-height:0;overflow-y:auto}.side nav a{padding:9px 12px}.side .me{flex:0 0 auto}}
