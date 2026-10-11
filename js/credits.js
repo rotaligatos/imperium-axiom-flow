@@ -108,13 +108,16 @@ async function confCard(box, cur, { rpc, esc, toast, errBox }) {
   try {
     const g = await rpc("iaf_leave_settings_get", { p_company: cur.id });
     const staff = g.hr_staff || [];
+    const nowName = g.effective_receiver === g.hr_manager_id ? g.hr_manager_name : ((staff.find((x) => x.id === g.effective_receiver) || {}).full_name);
+    const mgr = g.hr_manager_name ? `HR Manager — ${esc(g.hr_manager_name)} (default)` : "HR Manager (default) — none with a login on the organizational chart yet";
     box.innerHTML = `<h3>Confidential leave (RA 9262)</h3>
-      <p class="s">These requests skip the supervisor and manager and go to the HR person below. On each request, HR can hand the case to a supervisor or manager when needed.</p>
-      ${staff.length ? `<form class="form" id="cform2"><label>Goes to<select name="r"><option value="">First HR staff member (default)</option>
+      <p class="s">These requests skip the supervisor and manager and go to the HR Manager. The HR Manager may hand this to an HR supervisor or HR staff member, and on each request HR can hand a single case to a supervisor or manager when needed.</p>
+      <p class="s">Now going to: <b>${esc(nowName || "nobody — employees are told to contact HR directly")}</b></p>
+      ${g.can_change ? `<form class="form" id="cform2"><label>Goes to<select name="r"><option value="">${mgr}</option>
         ${staff.map((x) => `<option value="${esc(x.id)}" ${g.confidential_receiver === x.id ? "selected" : ""}>${esc(x.full_name)}</option>`).join("")}</select></label>
-        <p class="s">Now going to: <b>${esc((staff.find((x) => x.id === g.effective_receiver) || {}).full_name || "nobody")}</b></p>
+        ${staff.length ? "" : `<p class="s">No HR supervisor or staff account in ${esc(cur.short_code)} yet to hand it to.</p>`}
         <div class="eerr"></div><button class="btn primary" type="submit">Save</button></form>`
-        : `<div class="alert warn">No HR staff account in ${esc(cur.short_code)} yet. Until one is added, employees are told to contact HR directly.</div>`}`;
+        : `<p class="s">Only the HR Manager can change this.</p>`}`;
     const f = box.querySelector("#cform2");
     if (f) f.onsubmit = async (ev) => { ev.preventDefault(); f.querySelector(".eerr").innerHTML = "";
       try { await rpc("iaf_leave_settings_save", { p_company: cur.id, p_receiver: f.r.value || null }); toast("Saved ✔"); confCard(box, cur, { rpc, esc, toast, errBox }); }
