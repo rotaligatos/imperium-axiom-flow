@@ -2,7 +2,7 @@
 // Salary figures found in an uploaded file are sent to the server and kept in a table only HR can read; this page never shows them.
 import { keepPlace } from "./keep.js";
 import { readAnyFile, mapEmployeeRows, mapChildrenRows, suggestDeptMap } from "./xlsxread.js";
-import { templateCsv, exportCsv, childrenTemplateCsv, childrenExportCsv, downloadCsv, humanField, renderP201 } from "./p201.js";
+import { templateCsv, exportCsv, childrenTemplateCsv, childrenExportCsv, downloadCsv, humanField, renderP201, leaveTemplateCsv, LEAVE_GUIDE, leaveMissing } from "./p201.js";
 
 const RANKS = { 1: "Rank and File", 2: "Staff", 3: "Supervisor", 4: "Manager", 5: "Head / HR Manager", 6: "Director", 7: "Managing Director" };
 const RANK_OPTS = (sel) => [7, 6, 5, 4, 3, 2, 1].map((n) => `<option value="${n}"${n === sel ? " selected" : ""}>${RANKS[n]}</option>`).join("");
@@ -64,6 +64,10 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
     <div class="card only-desktop"><div class="between"><b>Upload employee 201 list</b><span class="pact"><button class="link" data-tpl>Blank template</button><button class="link" data-export>Export current 201</button></span></div>
       <p class="s">One sheet for everyone: name, job, department, hire date, <b>status (active / separated)</b> and all 201 details. Upload an Excel (.xlsx) or CSV file. You will see a preview first — nothing is saved until you confirm. A <b>blank cell never erases</b> what is already saved. People already in the list are matched by Employee No, then by name; anyone else is added. Salary columns and government numbers are stored for HR staff only.</p>
       <input type="file" id="empfile" accept=".xlsx,.csv" hidden><button class="btn block" data-pick>Choose Excel / CSV file…</button><div id="imp"></div></div>
+    <details class="card grp only-desktop" id="leavebox"><summary><b>201 for leave — what HR needs to fill</b> <span class="chip mute">guide + template</span></summary>
+      <p class="s">The leave rules read these fields. Download the template: it already lists your active people with what is saved now. Fill the blanks and upload it above with “Choose Excel / CSV file”. Blank cells never erase saved data.</p>
+      <div class="tscroll"><table class="dtab"><tr><th>Column</th><th>Values</th><th>Used for</th><th>Needed</th></tr>${LEAVE_GUIDE.map(([c, v, u, req]) => `<tr><td><b>${esc(c)}</b></td><td>${esc(v)}</td><td>${esc(u)}</td><td>${req ? "Required" : "When it applies"}</td></tr>`).join("")}</table></div>
+      <div class="between"><span class="pact"><button class="link" data-ltpl>Download leave template (${esc(cur.short_code)})</button><button class="link" data-lcheck>Who is still incomplete?</button></span></div><div id="lmiss"></div></details>
     <details class="card grp only-desktop" id="kidbox"><summary><b>Children &amp; deliveries upload</b> <span class="chip mute">for Paternity / Maternity</span></summary>
       <p class="s">Optional second sheet: one row per child (or miscarriage) with the date. Upload the main 201 sheet first so the people exist.</p>
       <div class="between"><span class="pact"><button class="link" data-ktpl>Blank template</button><button class="link" data-kexport>Export current</button></span></div>
@@ -109,6 +113,10 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
     const co = ev.target.closest("[data-co]"); if (co) { state.empCompany = co.dataset.co; state.empQuery = ""; return reload(); }
     if (ev.target.closest("[data-tpl]")) return downloadCsv("IAF_201_template.csv", templateCsv());
     if (ev.target.closest("[data-ktpl]")) return downloadCsv("IAF_children_template.csv", childrenTemplateCsv());
+    if (ev.target.closest("[data-ltpl]")) return rpc("iaf_employee_201_export", { p_company: cur.id }).then((x) => downloadCsv(`IAF_201_leave_${cur.short_code}_${new Date().toISOString().slice(0, 10)}.csv`, leaveTemplateCsv(x.people))).catch((e) => toast(e.message, true));
+    if (ev.target.closest("[data-lcheck]")) { const box = el.querySelector("#lmiss"); box.innerHTML = `<div class="empty small">Checking…</div>`;
+      return rpc("iaf_employee_201_export", { p_company: cur.id }).then((x) => { const act = x.people.filter((p) => (p.status || "active") === "active"); const bad = act.map((p) => [p, leaveMissing(p)]).filter(([, m]) => m.length);
+        box.innerHTML = `<p class="s"><b>${act.length - bad.length} of ${act.length}</b> active people are complete for leave.</p>` + (bad.length ? `<div class="tscroll"><table class="dtab"><tr><th>Employee No</th><th>Name</th><th>Missing</th></tr>${bad.map(([p, m]) => `<tr><td>${esc(p.employee_no || "—")}</td><td>${esc(p.name)}</td><td>${esc(m.join(", "))}</td></tr>`).join("")}</table></div>` : ""); }).catch((e) => { box.innerHTML = errBox(e); }); }
     if (ev.target.closest("[data-export]") || ev.target.closest("[data-kexport]")) { const kids = !!ev.target.closest("[data-kexport]");
       return rpc("iaf_employee_201_export", { p_company: cur.id }).then((x) => downloadCsv(`IAF_${kids ? "children" : "201"}_${cur.short_code}_${new Date().toISOString().slice(0, 10)}.csv`, kids ? childrenExportCsv(x.children) : exportCsv(x.people))).catch((e) => toast(e.message, true)); }
     if (ev.target.closest("[data-kpick]")) return el.querySelector("#kidfile").click();
