@@ -192,7 +192,8 @@ async function viewFile(tok) {
         : c === "MATERNITY" ? `<fieldset class="fs"><legend>Maternity</legend><label class="check"><input type="radio" name="mkind" value="birth" checked><span>Childbirth (normal or caesarean)</span></label>
             <label class="check"><input type="radio" name="mkind" value="miscarriage"><span>Miscarriage / pregnancy loss</span></label>
             <label id="trrow">Days given to the child's father (0–7)<input type="number" name="transfer" min="0" max="7" step="1" value="0"></label></fieldset>`
-        : c === "PATERNITY" ? `<label>Date of the delivery or miscarriage<input type="date" name="delivery"></label>` : "";
+        : c === "PATERNITY" ? `<label>Date of the delivery or miscarriage<input type="date" name="delivery"></label>`
+        : c === "WFH" ? `<label class="check"><input type="checkbox" name="wfhack"><span>I will send my work accomplishment report to my manager by the end of each working day (email or hard copy).</span></label>` : "";
       const cal = ty.day_basis === "calendar";
       f.days.readOnly = cal; f.days.step = cal ? "1" : "0.5";
       document.getElementById("rlabel").textContent = ty.confidential ? "Reason (only HR will see this)" : "Reason";
@@ -207,6 +208,7 @@ async function viewFile(tok) {
       if (c === "BEREAVEMENT") return { relationship: f.rel.value, deceased_name: f.deceased.value.trim() };
       if (c === "MATERNITY") { const k = (f.querySelector("input[name=mkind]:checked") || {}).value || "birth"; return { kind: k, transfer_days: k === "birth" ? Number(f.transfer.value || 0) : 0 }; }
       if (c === "PATERNITY") return { delivery_date: f.delivery.value || null };
+      if (c === "WFH") return { report_ack: !!f.wfhack.checked };
       return null;
     };
     const sync = () => {

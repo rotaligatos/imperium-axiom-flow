@@ -1,5 +1,6 @@
 // Employees page (Administrator / HR): the company's people list, Excel/CSV upload with a preview, add or edit one person.
 // Salary figures found in an uploaded file are sent to the server and kept in a table only HR can read; this page never shows them.
+import { keepPlace } from "./keep.js";
 import { readAnyFile, mapEmployeeRows, mapChildrenRows, suggestDeptMap } from "./xlsxread.js";
 import { templateCsv, exportCsv, childrenTemplateCsv, childrenExportCsv, downloadCsv, humanField, renderP201 } from "./p201.js";
 
@@ -96,7 +97,7 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
     ${canLevels ? `<div class="card"><p class="s">The ladder position belongs to the job title, so everyone with that title follows it. Supervisor and above approve leave (Staff and Rank and File never do, even if people report to them). Head and Director also see everyone's leave in the company. Salary records are separate: only people marked “HR staff” in the Admin tab can read them.</p>
       ${lk.roles.map((r) => `<div class="between lvl" data-role="${esc(r.id)}"><span>${esc(r.title)}</span><select>${RANK_OPTS(r.rank)}</select></div>`).join("") || "<small>No job titles yet.</small>"}</div>` : ""}`;
 
-  const reload = () => renderEmployees(el, { rpc, esc, toast, errBox, state });
+  const reload = () => keepPlace(el, () => renderEmployees(el, { rpc, esc, toast, errBox, state }));
   const nz = (v) => v || null;
   const saveArgs = (f, id) => ({ p_id: id || null, p_company: cur.id, p_full_name: f.name.value.trim(), p_dept_id: nz(f.dept.value), p_role_id: nz(f.role.value), p_hire_date: nz(f.hire.value),
     p_employee_no: nz(f.no.value.trim()), p_status: f.status.value, p_reports_to: nz(f.rep.value) });

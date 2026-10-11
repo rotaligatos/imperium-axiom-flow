@@ -1,3 +1,4 @@
+import { keepPlace } from "./keep.js";
 // Org chart (administrator / HR staff): one department at a time, drag a person onto their manager.
 // Drag works with mouse and touch (pointer events). Every box can also be edited without dragging (select a person → "Reports to").
 const RANKS = { 1: "Rank and File", 2: "Staff", 3: "Supervisor", 4: "Manager", 5: "Head / HR Manager", 6: "Director", 7: "Managing Director" };
@@ -79,7 +80,7 @@ export async function renderOrg(el, { rpc, esc, toast, errBox, state }) {
         : state.isAdmin ? `<div id="olink"><p class="s">No login yet. To let this person file leave, create their login in Supabase (Authentication → Users → Add user), then link it here.</p><div class="empty small">Loading logins…</div></div>` : `<p class="s">No login yet. The administrator can link one.</p>`}
       <div id="oerr"></div></div>` : ""}`;
 
-  const reload = () => renderOrg(el, { rpc, esc, toast, errBox, state });
+  const reload = () => keepPlace(el, () => renderOrg(el, { rpc, esc, toast, errBox, state }));
   const setRep = async (nid, mgrEmp, msg = "Moved ✔") => {
     const n = byId[nid];
     try { await (n.extra ? rpc("iaf_position_set_reports_to", { p_id: n.extra, p_manager_id: mgrEmp }) : rpc("iaf_org_set_reports_to", { p_employee_id: n.emp, p_manager_id: mgrEmp })); toast(msg); } catch (e) { toast(e.message, true); } await reload(); };
