@@ -210,3 +210,5 @@ label.tick{display:inline-flex!important;flex-direction:row;align-items:center;g
 .pre{white-space:pre-wrap}
 .flist{list-style:none;padding:0;margin:0 0 12px}.flist li{padding:6px 0;border-bottom:1px solid var(--line)}
 .list.pick{max-height:260px;overflow:auto;margin-bottom:8px}
+
+.natgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 14px}@media(min-width:860px){.natgrid{grid-template-columns:repeat(4,minmax(0,1fr))}}
