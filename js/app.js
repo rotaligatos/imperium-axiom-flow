@@ -151,28 +151,63 @@ function reqRow(r, base = "#/requests/", activeId = null) {
 
 // (viewRequests / viewApprovals are now viewSplit, below)
 
+const REL = { parent: "Parent", sibling: "Brother / sister", spouse: "Husband / wife", child: "Child" };
 async function viewFile(tok) {
   shell("file", "File a leave", loading());
   const el = document.querySelector(".content");
   try {
-    const types = await loadTypes(); if (tok !== navToken) return;
-    const order = ["VL", "SL"]; const sorted = [...types].sort((a, b) => (order.indexOf(a.code) + 1 || 99) - (order.indexOf(b.code) + 1 || 99) || a.display_name.localeCompare(b.display_name));
+    let types; try { types = await rpc("iaf_leave_types_for_me"); } catch { types = (await loadTypes()).map((x) => ({ ...x, available: true, docs: [], day_basis: "working" })); }
+    if (tok !== navToken) return;
+    const avail = types.filter((x) => x.available), off = types.filter((x) => !x.available);
     const t = todayStr();
     el.innerHTML = `<form id="ff" class="form">
-      <label>Leave type<select name="type" required>${sorted.map((x) => `<option value="${esc(x.code)}">${esc(x.display_name)}</option>`).join("")}</select></label>
+      <label>Leave type<select name="type" required>${avail.map((x) => `<option value="${esc(x.code)}">${esc(x.display_name)}</option>`).join("")}</select>
+        ${off.length ? `<small>Not available to you: ${off.map((x) => `${esc(x.display_name)} (${esc(x.why)})`).join(", ")}</small>` : ""}</label>
+      <div id="tnote"></div>
+      <div id="tdetail"></div>
       <div class="two"><label>From<input type="date" name="start" value="${t}" required></label><label>To<input type="date" name="end" value="${t}" required></label></div>
       <label>Number of days<input type="number" name="days" min="0.5" step="0.5" inputmode="decimal" value="1" required>
         <small id="dayhint"></small></label>
-      <label><span>Reason</span><textarea name="reason" rows="3" maxlength="500" minlength="3" required placeholder="Tell your approver why you are filing this leave"></textarea></label>
+      <label><span id="rlabel">Reason</span><textarea name="reason" rows="3" maxlength="500" minlength="3" required placeholder="Tell your approver why you are filing this leave"></textarea></label>
       <label class="check" id="covrow" hidden><input type="checkbox" name="cov"><span>Use my Vacation Leave to cover an exhausted Sick Leave<small>This needs extra approval from the HR Manager.</small></span></label>
-      <div id="h1warn"></div><div id="ferr"></div><button class="btn primary block" type="submit">Sign &amp; submit</button><p class="s" style="text-align:center">Your fingerprint, face or device PIN is your signature on the form.</p>
-      <p class="fine">Your request goes to your approver automatically. You'll see its progress under “My requests”. <a href="#/policies">Leave rules &amp; memos →</a></p></form>`;
+      <div id="chk"></div><div id="h1warn"></div><div id="ferr"></div><button class="btn primary block" type="submit">Sign &amp; submit</button><p class="s" style="text-align:center">Your fingerprint, face or device PIN is your signature on the form.</p>
+      <p class="fine" id="routefine">Your request goes to your approver automatically. You'll see its progress under “My requests”. <a href="#/policies">Leave rules &amp; memos →</a></p></form>`;
     const f = document.getElementById("ff");
+    const typeOf = () => types.find((x) => x.code === f.type.value) || {};
     let touchedDays = false;
+    // per-type extra questions (kept in the form while switching types)
+    const renderType = () => {
+      const ty = typeOf(), c = ty.code;
+      document.getElementById("tnote").innerHTML = ty.note || (ty.docs || []).length
+        ? `<div class="alert ${ty.confidential ? "warn" : ""}">${ty.confidential ? "<b>🔒 Confidential.</b> " : ""}${esc(ty.note || "")}${(ty.docs || []).length ? `<br><small>Documents: ${ty.docs.map(esc).join(" · ")}</small>` : ""}</div>` : "";
+      const d = document.getElementById("tdetail");
+      d.innerHTML = c === "BEREAVEMENT" ? `<div class="two"><label>Who passed away?<select name="rel"><option value="">— choose —</option>${Object.entries(REL).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></label>
+            <label>Name of the deceased<input name="deceased" maxlength="120"></label></div>`
+        : c === "MATERNITY" ? `<fieldset class="fs"><legend>Maternity</legend><label class="check"><input type="radio" name="mkind" value="birth" checked><span>Childbirth (normal or caesarean)</span></label>
+            <label class="check"><input type="radio" name="mkind" value="miscarriage"><span>Miscarriage / pregnancy loss</span></label>
+            <label id="trrow">Days given to the child's father (0–7)<input type="number" name="transfer" min="0" max="7" step="1" value="0"></label></fieldset>`
+        : c === "PATERNITY" ? `<label>Date of the delivery or miscarriage<input type="date" name="delivery"></label>` : "";
+      const cal = ty.day_basis === "calendar";
+      f.days.readOnly = cal; f.days.step = cal ? "1" : "0.5";
+      document.getElementById("rlabel").textContent = ty.confidential ? "Reason (only HR will see this)" : "Reason";
+      document.getElementById("routefine").innerHTML = ty.confidential
+        ? "This goes straight to HR. Your supervisor and manager only see “Leave (confidential)” and the dates."
+        : `Your request goes to your approver automatically. You'll see its progress under “My requests”. <a href="#/policies">Leave rules &amp; memos →</a>`;
+      d.querySelectorAll("input,select").forEach((x) => x.addEventListener("change", () => { if (x.name === "mkind") document.getElementById("trrow").hidden = x.value !== "birth"; check(); }));
+      d.querySelectorAll("input[name=deceased]").forEach((x) => x.addEventListener("input", check));
+    };
+    const detail = () => {
+      const c = f.type.value;
+      if (c === "BEREAVEMENT") return { relationship: f.rel.value, deceased_name: f.deceased.value.trim() };
+      if (c === "MATERNITY") { const k = (f.querySelector("input[name=mkind]:checked") || {}).value || "birth"; return { kind: k, transfer_days: k === "birth" ? Number(f.transfer.value || 0) : 0 }; }
+      if (c === "PATERNITY") return { delivery_date: f.delivery.value || null };
+      return null;
+    };
     const sync = () => {
       const s = f.start.value, e = f.end.value; const hint = document.getElementById("dayhint");
-      if (s && e && e >= s) { const span = spanDays(s, e); f.days.max = span; if (!touchedDays) f.days.value = span;
-        hint.textContent = `${span} calendar day${span > 1 ? "s" : ""} selected — lower this to skip weekends/rest days, or use 0.5 for a half day.`; }
+      if (s && e && e >= s) { const span = spanDays(s, e); f.days.max = span; if (!touchedDays || typeOf().day_basis === "calendar") f.days.value = span;
+        hint.textContent = typeOf().day_basis === "calendar" ? `${span} calendar day${span > 1 ? "s" : ""} (this leave counts every day, including weekends).`
+          : `${span} calendar day${span > 1 ? "s" : ""} selected — lower this to skip weekends/rest days, or use 0.5 for a half day.`; }
       else hint.textContent = "“To” must be on or after “From”.";
       document.getElementById("covrow").hidden = f.type.value !== "VL";
       if (f.type.value !== "VL") f.cov.checked = false;
@@ -181,13 +216,24 @@ async function viewFile(tok) {
     // working days = the person's schedule minus rest days and holidays (the server counts the same way and refuses more)
     let cseq = 0;
     const count = async () => {
-      const s = f.start.value, e = f.end.value, my = ++cseq; if (!s || !e || e < s) return;
+      const s = f.start.value, e = f.end.value, my = ++cseq; if (!s || !e || e < s || typeOf().day_basis === "calendar") return;
       try { const c = await rpc("iaf_leave_count", { p_start: s, p_end: e }); if (my !== cseq) return;
         if (!c.assumed) { f.days.max = Math.max(c.days, 0.5); if (!touchedDays) f.days.value = c.days || 0; }
         const sk = (c.skipped || []).map((x) => `${new Date(x.date + "T00:00:00").toLocaleDateString("en-PH", { month: "short", day: "numeric" })} (${x.why})`);
         document.getElementById("dayhint").textContent = `${c.days} working day${c.days === 1 ? "" : "s"}${c.assumed ? " (no schedule set yet — counted Mon–Fri)" : ""}${sk.length ? " · not counted: " + sk.join(", ") : ""}. Use 0.5 for a half day.`;
       } catch {}
     };
+    // eligibility + limits for the chosen type (the server runs the same check when you submit)
+    let kseq = 0, blocked = false;
+    const check = async () => { const box = document.getElementById("chk"), my = ++kseq;
+      if (!f.start.value || !f.end.value) return;
+      try { const k = await rpc("iaf_leave_check", { p_code: f.type.value, p_start: f.start.value, p_end: f.end.value, p_days: Number(f.days.value) || null, p_detail: detail() }); if (my !== kseq || !k) return;
+        const needsDetail = (k.errors || []).every((x) => /^(Choose who passed|Enter the name|Enter the date)/.test(x));
+        blocked = !k.ok;
+        box.innerHTML = (k.errors || []).length ? `<div class="alert ${needsDetail ? "warn" : "bad"}">${k.errors.map(esc).join("<br>")}</div>` : "";
+        if ((k.warnings || []).length) box.innerHTML += `<div class="alert warn">${k.warnings.map(esc).join("<br>")}</div>`;
+        if (k.ok && k.max_days != null && typeOf().code !== "VL" && typeOf().code !== "SL") box.innerHTML += `<p class="s">You can file up to <b>${num(k.max_days)}</b> day(s) of ${esc(typeOf().display_name)} here.${k.note && k.note !== typeOf().note ? " " + esc(k.note) : ""}</p>`;
+      } catch { blocked = false; box.innerHTML = ""; } };
     // January–June: only half of the year's VL; more is allowed but needs the approver's approval
     let hseq = 0;
     const half = async () => { const box = document.getElementById("h1warn"), my = ++hseq; box.innerHTML = "";
@@ -195,20 +241,26 @@ async function viewFile(tok) {
       try { const h = await rpc("iaf_leave_vl_h1_preview", { p_start: f.start.value, p_end: f.end.value, p_days: Number(f.days.value) }); if (my !== hseq) return;
         if (h && h.applies && Number(h.over) > 0) box.innerHTML = `<div class="alert warn">From January to June only half of your Vacation Leave can be used (${num(h.cap)} of ${num(h.total)} days; ${num(h.left)} left). ${num(h.over)} day${Number(h.over) === 1 ? "" : "s"} of this request go${Number(h.over) === 1 ? "es" : ""} past that, so your approver will see it marked as needing approval.</div>`;
       } catch {} };
-    ["start", "end", "type"].forEach((n) => f[n].addEventListener("change", () => { if (n !== "type") touchedDays = false; if (n === "start" && f.end.value < f.start.value) f.end.value = f.start.value; sync(); if (n !== "type") count().then(half); else half(); }));
-    f.days.addEventListener("change", half);
-    sync(); count().then(half);
+    ["start", "end", "type"].forEach((n) => f[n].addEventListener("change", () => {
+      if (n === "type") { touchedDays = false; renderType(); }
+      else touchedDays = false;
+      if (n === "start" && f.end.value < f.start.value) f.end.value = f.start.value;
+      sync(); count().then(() => { half(); check(); }); }));
+    f.days.addEventListener("change", () => { half(); check(); });
+    renderType(); sync(); count().then(() => { half(); check(); });
     f.addEventListener("submit", async (ev) => {
-      ev.preventDefault(); const btn = f.querySelector("button[type=submit]"); btn.disabled = true; btn.textContent = "Submitting…";
+      ev.preventDefault(); const btn = f.querySelector("button[type=submit]");
       document.getElementById("ferr").innerHTML = "";
+      if (blocked) { document.getElementById("ferr").innerHTML = errBox(new Error("Please fix the points above first.")); return; }
+      btn.disabled = true; btn.textContent = "Submitting…";
       try {
         if (f.reason.value.trim().length < 3) throw new Error("Please enter a reason for your leave.");
         btn.textContent = "Waiting for your fingerprint / face / PIN…";
         const sig = await sign("SUBMIT", state.me?.full_name);
         btn.textContent = "Submitting…";
-        const id = await rpc("iaf_leave_submit", { p_leave_type_code: f.type.value, p_start_date: f.start.value, p_end_date: f.end.value,
-          p_days: Number(f.days.value), p_reason: f.reason.value.trim(), p_is_wfh: f.type.value === "WFH", p_is_vl_covering_sl: !!f.cov.checked, p_signature_id: sig });
-        toast("Leave submitted ✔"); location.hash = `#/requests/${id}`;
+        const id = await rpc("iaf_leave_submit2", { p_leave_type_code: f.type.value, p_start_date: f.start.value, p_end_date: f.end.value,
+          p_days: Number(f.days.value), p_reason: f.reason.value.trim(), p_detail: detail(), p_is_wfh: f.type.value === "WFH", p_is_vl_covering_sl: !!f.cov.checked, p_signature_id: sig });
+        toast(typeOf().confidential ? "Sent to HR ✔" : "Leave submitted ✔"); location.hash = `#/requests/${id}`;
       } catch (e) { document.getElementById("ferr").innerHTML = errBox(e); btn.disabled = false; btn.textContent = "Sign & submit"; }
     });
   } catch (e) { el.innerHTML = errBox(e); }
@@ -247,6 +299,12 @@ async function renderDetail(el, id, tok, mode) {
     const back = `<a class="back" href="#/${mode}">‹ Back to list</a>`;
     const r = rows[0]; if (!r) { el.innerHTML = back + `<div class="empty">This request isn't available.</div>`; return; }
     const mine = r.requester_id === userId();
+    let priv = null; if (r.leave_types?.code === "CONFIDENTIAL") { try { priv = await rpc("iaf_leave_private_get", { p_request: r.id }); } catch {} }
+    const dt = priv?.detail || r.detail || {};
+    const detailRows = [
+      dt.relationship ? `<dt>Deceased</dt><dd>${esc(dt.deceased_name || "")} (${esc(REL[dt.relationship] || dt.relationship)})</dd>` : "",
+      dt.kind ? `<dt>Maternity</dt><dd>${dt.kind === "miscarriage" ? "Miscarriage" : "Childbirth"}${Number(dt.transfer_days) ? ` · ${num(dt.transfer_days)} day(s) given to the father` : ""}</dd>` : "",
+      dt.delivery_date ? `<dt>Delivery date</dt><dd>${esc(fmtDate(dt.delivery_date))}</dd>` : "" ].join("");
     const lastCounter = [...apps].reverse().find((a) => a.action === "COUNTERED");
     let actions = "";
     if (mine && r.status === "COUNTERED" && lastCounter) {
@@ -270,7 +328,8 @@ async function renderDetail(el, id, tok, mode) {
     el.innerHTML = back + `<div class="card"><div class="between"><h2 class="nm">${esc(r.leave_types?.display_name)}</h2>${chip(r.status)}</div>
       ${!mine ? `<p class="s">Requested by <b>${esc(r.requester?.full_name)}</b></p>` : ""}
       <dl><dt>Dates</dt><dd>${esc(fmtRange(r.start_date, r.end_date))}</dd><dt>Days</dt><dd>${num(r.days_requested)}</dd>
-      ${r.reason ? `<dt>Reason</dt><dd>${esc(r.reason)}</dd>` : ""}
+      ${priv ? `<dt>Type</dt><dd>🔒 ${esc(priv.type_name || priv.type_code)} <small>(only you and HR see this)</small></dd>` : ""}
+      ${(priv?.reason || r.reason) ? `<dt>Reason</dt><dd>${esc(priv?.reason || r.reason)}</dd>` : ""}${detailRows}
       ${r.is_vl_covering_sl ? `<dt>Note</dt><dd>VL covering exhausted SL (HR Manager approval required)</dd>` : ""}
       ${r.is_unpaid_loa_conversion ? `<dt>Note</dt><dd>Balance ran out — converted to unpaid leave</dd>` : ""}
       ${r.vl_h1_over ? `<dt>Note</dt><dd class="warnt">Uses more than half of the year's Vacation Leave before July 1 — this needs ${mine ? "your approver's" : "your"} approval (company policy: only half can be used January–June).</dd>` : ""}
