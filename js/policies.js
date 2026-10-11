@@ -108,7 +108,7 @@ async function renderDetail(box, ctx, reload) {
     try {
       const blob = await storageBlob(BUCKET, d.file_path);
       const coId = d.company_id || cache.opts?.companies?.[0]?.id || null;
-      const out = await fnCall("iaf-policy-ai", { file_base64: await toB64(blob), media_type: /\.pdf$/i.test(d.file_path) ? "application/pdf" : (blob.type || "image/jpeg"), file_name: d.file_name || d.file_path.split("/").pop(), company_id: coId }, 150000);
+      const out = await fnCall("iaf-policy-ai", { file_base64: await toB64(blob), media_type: /\.pdf$/i.test(d.file_path) ? "application/pdf" : (blob.type || "image/jpeg"), file_name: d.file_name || d.file_path.split("/").pop(), company_id: coId, memo_id: d.id }, 150000);
       q.mode = "edit"; q.draft = mergeReading(d, out.reading); reload();
     } catch (x) { toast(x.message, true); af.disabled = false; af.textContent = "✨ Fill in from file"; }
   };
@@ -171,10 +171,16 @@ async function renderForm(el, ctx, reload) {
   const sup = d.supersedes_id || "";
   const canPlant = (cid) => opts.hr || !!coOpt(cid)?.plantwide;
   const aud = d.audience || (canPlant(coId) ? "all" : "departments");
+  const file0 = d._file || null;
 
   el.innerHTML = `<div class="card only-desktop"><div class="between"><h3>${q.mode === "edit" ? "Edit memo" : ai ? "Check what the AI read" : "Add a memo"}</h3>${d._file ? `<span class="s">File: ${esc(d._file.name)}</span>` : ""}</div>
     ${ai ? `<p class="s">Filled in by the AI from the memo. Please check every field before saving.</p>` : ""}
-    ${ai && (ai.questions || []).length ? `<div class="alert warn"><b>The AI is not sure about:</b><ul class="warnlist">${ai.questions.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+    ${ai && (d._diffs || []).length ? `<div class="alert warn"><b>The AI read something different from what is saved.</b> Choose which one to keep:
+      <table class="difft">${d._diffs.map((x, i) => `<tr><th>${esc(x.label)}</th><td><small>Saved</small><br>${esc(x.saved)}</td><td><small>AI read</small><br>${esc(x.ai)}</td><td><button type="button" class="btn" data-useai="${i}">Use AI's</button></td></tr>`).join("")}</table></div>` : ""}
+    ${ai && (file0 || d.file_path) ? `<div class="alert ${((ai.questions || []).length) ? "warn" : ""} askai">${(ai.questions || []).length ? `<b>The AI is not sure about these. Answer what you know, then press Ask again:</b>` : `<b>Something wrong?</b> Tell the AI and press Ask again.`}
+      ${(ai.questions || []).map((x, i) => `<label class="aq"><span>${esc(x)}</span><input data-ans="${i}" maxlength="1000" placeholder="Your answer" value="${esc((d._answers || {})[x] || "")}"></label>`).join("")}
+      <label class="aq"><span>Anything else the AI got wrong?</span><textarea id="ainote" rows="2" maxlength="2000" placeholder="e.g. This memo is for WCLI and CWLI. Issued Sept 3, 2026.">${esc(d._note || "")}</textarea></label>
+      <div class="btns"><button type="button" class="btn primary" id="askagain">Ask again</button></div></div>` : ""}
     ${ai && (ai.conflicts || []).length ? `<div class="alert bad"><b>⚠ This memo may conflict with company (HR) policy:</b><ul class="warnlist">${ai.conflicts.map((c) => `<li><b>${esc(c.memo_no || "")} ${esc(c.title || "")}</b> — ${esc(c.issue || "")}</li>`).join("")}</ul>
       Please consult HR for alignment before publishing. If you publish now, HR is notified to review it.</div>` : ""}
     <form class="form" id="mform">
@@ -207,6 +213,24 @@ async function renderForm(el, ctx, reload) {
   el.querySelector("#mcancel").onclick = cancel;
   const keep = () => { q.draft = { ...d, ...collect(), _file: d._file || f.file?.files?.[0] || null, _ai: ai }; };
   f.co.onchange = () => { keep(); q.draft.company_id = f.co.value === "" ? null : f.co.value; q.draft.audience_dept_ids = []; reload(); };
+  const FIELD = { memo_no: "memo", title: "ttl", issued_on: "ion", effective_on: "eff", signatories: "sig", summary: "sum" };
+  el.querySelectorAll("[data-useai]").forEach((b) => (b.onclick = () => { const x = d._diffs[Number(b.dataset.useai)]; f.elements[FIELD[x.k]].value = x.ai; b.closest("tr").remove(); }));
+  const ask = el.querySelector("#askagain"); if (ask) ask.onclick = async () => {
+    const qs = (ai.questions || []), answers = qs.map((x, i) => ({ question: x, answer: el.querySelector(`[data-ans="${i}"]`).value })).filter((a) => a.answer.trim());
+    const note = el.querySelector("#ainote").value;
+    if (!answers.length && !note.trim()) { toast("Answer a question or write what the AI got wrong first.", true); return; }
+    ask.disabled = true; ask.textContent = "Reading again… (up to a minute)";
+    try {
+      const blob = file0 || await storageBlob(BUCKET, d.file_path);
+      const name = file0 ? file0.name : (d.file_name || d.file_path.split("/").pop());
+      const mt = /\.pdf$/i.test(name) ? "application/pdf" : (blob.type || "image/jpeg");
+      const coId2 = f.co.value || myCos[0]?.id || null;
+      const out = await fnCall("iaf-policy-ai", { file_base64: await toB64(blob), media_type: mt, file_name: name, company_id: coId2, memo_id: d.id || undefined, answers, note }, 150000);
+      keep(); const prevAns = { ...(d._answers || {}) }; answers.forEach((a) => (prevAns[a.question] = a.answer));
+      q.draft = mergeReading(q.draft, out.reading); q.draft._answers = prevAns; q.draft._note = note; q.draft._file = file0;
+      toast("The AI read it again ✔ Check the highlighted parts."); reload();
+    } catch (x) { toast(x.message, true); ask.disabled = false; ask.textContent = "Ask again"; }
+  };
   el.querySelectorAll("[data-newtopic]").forEach((b) => (b.onclick = async () => { try { await rpc("iaf_policy_topic_save", { p_id: null, p_name: b.dataset.newtopic, p_description: null, p_active: true }); cache.topics = null; keep(); toast("Topic added ✔"); reload(); } catch (x) { toast(x.message, true); } }));
   function collect() {
     const tIds = [...f.querySelectorAll("input[name=topic]:checked")].map((i) => i.value);
@@ -241,7 +265,12 @@ async function renderForm(el, ctx, reload) {
 function mergeReading(d, r) {
   const a = fromReading(r, d.company_id), out = { ...d, _ai: r };
   const empty = (v) => v === null || v === undefined || (typeof v === "string" && !v.trim()) || (Array.isArray(v) && !v.length);
-  for (const k of ["memo_no", "title", "issued_on", "effective_on", "signatories", "summary", "full_text", "issued_by_dept_id", "supersedes_id"]) if (empty(out[k]) && !empty(a[k])) out[k] = a[k];
+  const LBL = { memo_no: "Memo no.", title: "Title", issued_on: "Date issued", effective_on: "Takes effect", signatories: "Signed / noted by", summary: "Summary" };
+  out._diffs = [];
+  for (const k of ["memo_no", "title", "issued_on", "effective_on", "signatories", "summary", "full_text", "issued_by_dept_id", "supersedes_id"]) {
+    if (empty(out[k]) && !empty(a[k])) out[k] = a[k];
+    else if (LBL[k] && !empty(a[k]) && String(out[k]).trim().toLowerCase() !== String(a[k]).trim().toLowerCase()) out._diffs.push({ k, label: LBL[k], saved: String(out[k]), ai: String(a[k]) });
+  }
   if (empty(d.audience_dept_ids) && !empty(a.audience_dept_ids) && d.company_id) { out.audience = a.audience; out.audience_dept_ids = a.audience_dept_ids; }
   const ids = new Set((d.topics || []).map((t) => t.id)); out.topics = [...(d.topics || []), ...a.topics.filter((t) => !ids.has(t.id))];
   return out;
