@@ -13,6 +13,9 @@ export async function renderPolicies(el, ctx) {
   let list, companies = [];
   try { list = await rpc("iaf_policy_list", { p_search: q.search || null, p_category: q.cat || null }); if (manage) companies = await rpc("iaf_my_companies").catch(() => []); } catch (e) { el.innerHTML = errBox(e); return; }
   const reload = () => renderPolicies(el, ctx);
+  const upload = async (id, f) => { if (f.size > 15 * 1024 * 1024) throw new Error("File is too big (15 MB max).");
+    const path = `${id}/${Date.now()}-${f.name.replace(/[^\w.\-]+/g, "_")}`;
+    await storageUpload(BUCKET, path, f); await rpc("iaf_policy_file_set", { p_id: id, p_path: path, p_name: f.name, p_size: f.size }); };
   const card = (d) => `<div class="card pol ${d.status !== "active" ? "dim" : ""}" data-id="${esc(d.id)}">
     <div class="between"><h3>${esc(d.title)}</h3><span class="chip">${esc(d.category)}</span></div>
     <p class="s">${d.memo_no ? `<b>${esc(d.memo_no)}</b> · ` : ""}${esc(fmtD(d.issued_on))}${d.signatories ? ` · ${esc(d.signatories)}` : ""} · ${esc(d.company)}${d.status !== "active" ? ` · <b>${ST[d.status]}</b>` : ""}${d.visibility !== "everyone" ? ` · ${esc(VIS[d.visibility])}` : ""}</p>
@@ -29,26 +32,30 @@ export async function renderPolicies(el, ctx) {
     <div class="two"><label>Who can read it<select name="vis">${Object.entries(VIS).map(([k, v]) => `<option value="${k}" ${(e.visibility || "everyone") === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
       <label>Signed by<input name="sig" maxlength="300" value="${esc(e.signatories || "")}"></label></div>
     <label>Short summary (what employees need to know)<textarea name="sum" rows="4" maxlength="4000">${esc(e.summary || "")}</textarea></label>
+    <label>Memo file (PDF or picture, up to 15 MB)${e.file_name ? ` — now: ${esc(e.file_name)}` : ""}<input type="file" name="file" accept="application/pdf,image/*"></label>
     <div class="eerr"></div><div class="btns"><button class="btn primary" type="submit">Save</button> <button class="btn" type="button" id="pcancel">Cancel</button></div></form></div>` : "";
   el.innerHTML = `<div class="card"><div class="between"><div class="form" style="display:flex;gap:8px;flex-wrap:wrap"><input id="psearch" type="search" placeholder="Search memos…" value="${esc(q.search)}">
       <select id="pcat"><option value="">All categories</option>${CATS.map((c) => `<option ${q.cat === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
       ${manage ? `<button class="btn primary only-desktop" id="padd">Add</button>` : ""}</div>
       ${manage ? `<p class="s only-mobile">Uploading and editing memos is done on a computer (a wider screen).</p><p class="s only-desktop">To attach the memo file, press <b>⬆ Upload PDF</b> on the memo below (PDF or picture, up to 15 MB).</p>` : ""}</div>
-    ${form}${list.length ? list.map(card).join("") : `<div class="empty">No policies or memos found.</div>`}`;
+    ${form}${list.length ? list.map(card).join("") : `<div class="empty">No policies or memos found${q.cat || q.search ? ` for this search. <button class="link" id="pclear">Show all</button>` : "."}</div>`}`;
   let t; const s = el.querySelector("#psearch"); s.oninput = () => { clearTimeout(t); t = setTimeout(() => { q.search = s.value; reload(); }, 400); };
   el.querySelector("#pcat").onchange = (ev) => { q.cat = ev.target.value; reload(); };
+  const pcl = el.querySelector("#pclear"); if (pcl) pcl.onclick = () => { q.cat = ""; q.search = ""; reload(); };
   const add = el.querySelector("#padd"); if (add) add.onclick = () => { q.edit = "new"; reload(); };
   el.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => { q.edit = b.dataset.edit; reload(); }));
   const pc = el.querySelector("#pcancel"); if (pc) pc.onclick = () => { q.edit = null; reload(); };
   el.querySelectorAll("[data-open]").forEach((b) => (b.onclick = async () => { b.disabled = true; try { const blob = await storageBlob(BUCKET, b.dataset.open); const url = URL.createObjectURL(blob); window.open(url, "_blank") || (location.href = url); } catch (x) { toast(x.message, true); } b.disabled = false; }));
   el.querySelectorAll("[data-st]").forEach((b) => (b.onclick = async () => { try { await rpc("iaf_policy_status", { p_id: b.closest("[data-id]").dataset.id, p_status: b.dataset.st }); toast("Done ✔"); reload(); } catch (x) { toast(x.message, true); } }));
   el.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => { const inp = document.createElement("input"); inp.type = "file"; inp.accept = "application/pdf,image/*";
-    inp.onchange = async () => { const f = inp.files[0]; if (!f) return; if (f.size > 15 * 1024 * 1024) return toast("File is too big (15 MB max).", true);
-      const id = b.dataset.up, path = `${id}/${Date.now()}-${f.name.replace(/[^\w.\-]+/g, "_")}`;
-      try { await storageUpload(BUCKET, path, f); await rpc("iaf_policy_file_set", { p_id: id, p_path: path, p_name: f.name, p_size: f.size }); toast("File saved ✔"); reload(); } catch (x) { toast(x.message, true); } };
+    inp.onchange = async () => { const f = inp.files[0]; if (!f) return;
+      try { await upload(b.dataset.up, f); toast("File saved ✔"); reload(); } catch (x) { toast(x.message, true); } };
     inp.click(); }));
   const pf = el.querySelector("#pform"); if (pf) pf.onsubmit = async (ev) => { ev.preventDefault(); const f = pf.elements, btn = pf.querySelector("button[type=submit]"); btn.disabled = true;
-    try { await rpc("iaf_policy_save", { p_id: q.edit === "new" ? null : q.edit, p_company: f.co.value || null, p_memo_no: f.memo.value, p_title: f.title.value, p_category: f.cat.value, p_issued_on: f.on.value || null,
-        p_signatories: f.sig.value, p_summary: f.sum.value, p_visibility: f.vis.value, p_status: e.status || "active" }); q.edit = null; toast("Saved ✔"); reload(); }
+    try { const file = f.file.files[0]; if (file && file.size > 15 * 1024 * 1024) throw new Error("File is too big (15 MB max).");
+      const id = await rpc("iaf_policy_save", { p_id: q.edit === "new" ? null : q.edit, p_company: f.co.value || null, p_memo_no: f.memo.value, p_title: f.title.value, p_category: f.cat.value, p_issued_on: f.on.value || null,
+        p_signatories: f.sig.value, p_summary: f.sum.value, p_visibility: f.vis.value, p_status: e.status || "active" });
+      if (file) { btn.textContent = "Uploading file…"; try { await upload(id, file); } catch (x) { q.edit = null; toast("Saved, but the file did not upload: " + x.message, true); reload(); return; } }
+      q.edit = null; toast(file ? "Saved with file ✔" : "Saved ✔"); reload(); }
     catch (x) { pf.querySelector(".eerr").innerHTML = errBox(x); btn.disabled = false; } };
 }
