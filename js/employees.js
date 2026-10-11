@@ -108,7 +108,8 @@ export async function renderEmployees(el, { rpc, esc, toast, errBox, state }) {
   const guard = async (btn, box, fn, ok) => { btn.disabled = true; if (box) box.innerHTML = ""; try { await fn(); toast(ok); await reload(); } catch (e) { if (box) box.innerHTML = errBox(e); else toast(e.message, true); btn.disabled = false; } };
 
   el.querySelector("#deptbox").addEventListener("toggle", (e) => { state.deptOpen = e.target.open; });
-  el.querySelector("#empq").oninput = (ev) => { state.empQuery = ev.target.value; const pos = ev.target.selectionStart; reload().then(() => { const i = el.querySelector("#empq"); i.focus(); i.setSelectionRange(pos, pos); }); };
+  el.querySelector("#empq").oninput = (ev) => { state.empQuery = ev.target.value; const pos = ev.target.selectionStart; clearTimeout(state.empQT);
+    state.empQT = setTimeout(() => { const my = (state.empQSeq = (state.empQSeq || 0) + 1); reload().then(() => { if (my !== state.empQSeq) return; const i = el.querySelector("#empq"); if (i) { i.focus(); i.setSelectionRange(pos, pos); } }); }, 300); };
   el.onclick = (ev) => {
     const co = ev.target.closest("[data-co]"); if (co) { state.empCompany = co.dataset.co; state.empQuery = ""; return reload(); }
     if (ev.target.closest("[data-tpl]")) return downloadCsv("IAF_201_template.csv", templateCsv());

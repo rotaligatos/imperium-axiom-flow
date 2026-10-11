@@ -1,4 +1,6 @@
 import { buildAtrfPdf, fmtDate } from "./atrf.js";
+import { visibleGroups, renderRoles } from "./roles.js";
+import { renderOb, renderObCheckins } from "./ob.js";
 import { renderAdmin } from "./admin.js";
 import { renderEmployees } from "./employees.js";
 import { renderOrg } from "./org.js";
@@ -69,24 +71,38 @@ async function refreshBadge() {
       rest(`leave_approvals?approver_id=eq.${userId()}&select=id&limit=1`) ]);
     state.pending = p.length; state.isApprover = p.length > 0 || a.length > 0;
     document.querySelectorAll("[data-badge]").forEach((el) => { el.textContent = state.pending; el.hidden = !state.pending; });
-    document.querySelectorAll("[data-approver-nav]").forEach((el) => { el.hidden = !state.isApprover; });
+    if (!state.preview) document.querySelectorAll("[data-approver-nav]").forEach((el) => { el.hidden = !state.isApprover; });
   } catch { /* badge is best-effort */ }
 }
 
 // ---------- shell ----------
+// The menu comes from js/roles.js (one definition, grouped). On a phone: Home, File leave, My requests, Approvals, More (all groups).
+function navFlags() {
+  if (state.preview) return state.preview.f;
+  return { approver: state.isApprover, late: !!(state.late && state.late.can_see), coc: !!state.canCoc, people: state.canPeople, admin: state.isAdmin };
+}
 function shell(active, title, body, wide = false) {
-  const nav = [["#/", "Home", "🏠", "home"], ["#/file", "File leave", "➕", "file"], ["#/requests", "My requests", "📄", "requests"],
-    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ["#/shift", "Change shift", "🔄", "shift"], ["#/time", "Half-day / Undertime", "⏱️", "time"], ["#/policies", "Policies & Memos", "📚", "policies"], ...(state.canCoc ? [["#/coc", "Code of Conduct", "⚖️", "coc"]] : []), ...(state.irAny ? [["#/ir", "Incident reports", "📝", "ir"]] : []), ...(state.late && state.late.can_see ? [["#/late", "Late leave filings", "⏰", "late"]] : []), ["#/account", "Account", "👤", "account"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/credits", "Leave credits", "🧮", "credits"], ["#/org", "Org chart", "🗂️", "org"], ["#/schedules", "Schedules", "🕒", "schedules"], ["#/notices", "Notices", "📢", "notices"], ["#/holidays", "Holidays", "🎌", "holidays"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
-  const links = nav.map(([h, t, ic, k]) => `<a href="${h}" class="${active === k ? "on" : ""}" ${k === "approvals" ? 'data-approver-nav ' + (state.isApprover ? "" : "hidden") : ""}>
-      <span class="ic" aria-hidden="true">${ic}</span><span>${t}</span>${k === "approvals" ? `<b class="badge" data-badge ${state.pending ? "" : "hidden"}>${state.pending}</b>` : ""}</a>`).join("");
+  const f = navFlags();
+  const link = ([h, t, ic, k], cls = "") => `<a href="${h}" class="${cls}${active === k ? " on" : ""}" ${k === "approvals" ? "data-approver-nav " + (f.approver ? "" : "hidden") : ""}>
+      <span class="ic" aria-hidden="true">${ic}</span><span>${t}</span>${k === "approvals" ? `<b class="badge" data-badge ${state.pending ? "" : "hidden"}>${state.pending}</b>` : ""}</a>`;
+  const home = ["#/", "Home", "🏠", "home"], acct = ["#/account", "Account", "👤", "account"];
+  const groups = visibleGroups(f).map((g) => {
+    const on = g.items.some((it) => it[3] === active);
+    return `<div class="ngroup${on ? " on" : ""}"><div class="nh">${esc(g.title)}</div>${g.items.map((it) => link(it)).join("")}</div>`;
+  }).join("");
+  const tabs = [home, ["#/file", "File", "➕", "file"], ["#/requests", "Requests", "📄", "requests"], ["#/approvals", "Approvals", "✅", "approvals"]].map((it) => link(it)).join("")
+    + `<a href="javascript:void 0" data-more class="${["home", "file", "requests", "approvals"].includes(active) ? "" : "on"}"><span class="ic" aria-hidden="true">☰</span><span>More</span></a>`;
+  const pv = state.preview ? `<div class="alert warn previewbar">Previewing the menu as <b>${esc(state.preview.name)}</b>. Pages still open with your own access. <button class="btn" data-act="endpreview">Exit preview</button></div>` : "";
   $app.innerHTML = `<div class="layout">
-    <aside class="side"><div class="brand"><img class="logo" src="icons/icon-192.png" alt="IAF"><div><strong>Imperium Axiom Flow</strong><small>HR · Leave</small></div></div>
-      <nav>${links}</nav>
+    <aside class="side"><div class="brand"><img class="logo" src="icons/icon-192.png" alt="IAF"><div><strong>Imperium Axiom Flow</strong><small>HR</small></div></div>
+      <nav>${link(home)}${groups}${link(acct)}</nav>
       <div class="me"><div class="av">${esc(initials(state.me?.full_name))}</div><div class="who">${esc(state.me?.full_name)}</div>
         <button class="link" data-act="signout">Sign out</button></div></aside>
     <main><header class="top"><h1>${esc(title)}</h1><button class="link only-mobile" data-act="signout">Sign out</button></header>
-      <div class="content${wide ? " wide" : ""}">${body}</div></main>
-    <nav class="tabs">${links}</nav></div>`;
+      ${pv}<div class="content${wide ? " wide" : ""}">${body}</div></main>
+    <nav class="tabs">${tabs}</nav>
+    <div class="sheet" id="moresheet" hidden><div class="sheetin"><div class="between"><b>Menu</b><button class="link" data-more>Close</button></div>
+      <nav class="sheetnav">${link(home)}${groups}${link(acct)}</nav></div></div></div>`;
 }
 const loading = (t = "Loading…") => `<div class="empty loading">${esc(t)}</div>`;
 const errBox = (e) => `<div class="alert bad">${esc(e.message || e)}</div>`;
@@ -136,18 +152,19 @@ async function viewHome(tok) {
     soft(rpc("iaf_my_leave_summary", { p_year: YEAR })).then((sm) => { const h = sm?.vl_first_half, box = document.getElementById("vlh1");
       if (!h || !box || tok !== navToken || new Date().getMonth() > 5) return;
       box.textContent = `Until June 30: ${num(h.left)} of ${num(h.cap)} days left to use (half of your VL). More needs approval.`; });
-    Promise.all([soft(rpc("iaf_my_schedule", { p_days: 7 })), soft(rpc("iaf_my_announcements")), soft(rpc("iaf_shift_change_inbox")), soft(rpc("iaf_time_adj_inbox")), soft(rpc("iaf_shift_change_news")), soft(rpc("iaf_shift_change_mine")), soft(rpc("iaf_holidays", { p_from: todayStr(), p_to: ymd(new Date(Date.now() + 30 * 86400000)) })), soft(rpc("iaf_holiday_alerts"))]).then(([mySch, myNotices, shiftIn, timeIn, shiftNews, shiftMine, hols, halert]) => {
+    Promise.all([soft(rpc("iaf_my_schedule", { p_days: 7 })), soft(rpc("iaf_my_announcements")), soft(rpc("iaf_shift_change_inbox")), soft(rpc("iaf_time_adj_inbox")), soft(rpc("iaf_shift_change_news")), soft(rpc("iaf_shift_change_mine")), soft(rpc("iaf_holidays", { p_from: todayStr(), p_to: ymd(new Date(Date.now() + 30 * 86400000)) })), soft(rpc("iaf_holiday_alerts")), soft(rpc("iaf_ob_today"))]).then(([mySch, myNotices, shiftIn, timeIn, shiftNews, shiftMine, hols, halert, obToday]) => {
       const box = document.getElementById("homeextra"); if (!box || tok !== navToken) return;
       const schedCard = mySch && mySch.linked && mySch.days.length ? `<div class="card mysched"><h3>My schedule</h3>${mySch.days.map((d, i) => `<div class="row${i === 0 ? " today" : ""}${d.rest ? " rest" : ""}"><span>${i === 0 ? "Today" : new Date(d.date + "T00:00:00").toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" })}</span><span>${esc(dayLine(d))}</span></div>`).join("")}${mySch.days[0].schedule ? `<p class="s">${esc(mySch.days[0].schedule)}</p>` : ""}</div>` : "";
       const shiftCard = Array.isArray(shiftIn) && shiftIn.length ? `<a class="notice" href="#/shift"><b>${shiftIn.length}</b> shift change request${shiftIn.length > 1 ? "s" : ""} waiting for your decision →</a>` : "";
       const timeCard = Array.isArray(timeIn) && timeIn.length ? `<a class="notice" href="#/time"><b>${timeIn.length}</b> half-day / undertime filing${timeIn.length > 1 ? "s" : ""} waiting for your decision →</a>` : "";
       const retCard = Array.isArray(shiftMine) && shiftMine.some((r) => r.mine && r.status === "returned") ? `<a class="notice" href="#/shift">A shift change you filed was returned to you for changes →</a>` : "";
-      const newsCard = (Array.isArray(shiftNews) ? shiftNews : []).map((r) => `<div class="notice"><b>Shift change approved:</b> ${esc(r.schedule)} for ${esc(r.dept ? "department " + r.dept : r.people.slice(0, 3).join(", ") + (r.people.length > 3 ? " +" + (r.people.length - 3) : ""))}, from ${esc(r.start_date)}${r.end_date ? " to " + esc(r.end_date) : ""} <button class="link" data-newsseen="${esc(r.id)}">Got it</button></div>`).join("");
+      const newsCard = (Array.isArray(shiftNews) ? shiftNews : []).map((r) => `<div class="notice"><b>Shift change approved:</b> ${esc(r.schedule)} for ${esc(r.dept ? "department " + r.dept : (r.people || []).slice(0, 3).join(", ") + ((r.people || []).length > 3 ? " +" + (r.people.length - 3) : ""))}, from ${esc(r.start_date)}${r.end_date ? " to " + esc(r.end_date) : ""} <button class="link" data-newsseen="${esc(r.id)}">Got it</button></div>`).join("");
       const holAlert = halert && halert.proposed > 0 && state.canPeople ? `<a class="notice" href="#/holidays"><b>${halert.proposed}</b> holiday${halert.proposed > 1 ? "s" : ""} waiting for your confirmation →</a>` : "";
       const holCard = Array.isArray(hols) && hols.length ? `<div class="card"><h3>Coming holidays</h3>${hols.slice(0, 4).map((h) => `<div class="row"><span>${esc(new Date(h.date + "T00:00:00").toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" }))}</span><span>${esc(h.name)}${h.kind === "special_working" ? " (work day)" : ""}</span></div>`).join("")}</div>` : "";
       const irAlert = state.irWaiting > 0 ? `<a class="notice" href="#/ir"><b>${state.irWaiting}</b> incident report${state.irWaiting > 1 ? "s" : ""} waiting for you →</a>` : "";
       const lateAlert = state.late && state.late.can_see && state.late.recent > 0 ? `<a class="notice" href="#/late"><b>${state.late.recent}</b> late leave filing${state.late.recent > 1 ? "s" : ""} in the last 30 days →</a>` : "";
-      box.innerHTML = irAlert + lateAlert + holAlert + retCard + newsCard + shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + holCard + `<a class="btn block" href="#/shift">🔄 Change shift</a><a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>`;
+      const obAlert = (Array.isArray(obToday) ? obToday : []).map((o) => `<a class="notice" href="#/ob">📍 <b>Official business today</b>: ${esc(o.destination || "")} — ${o.arrived_at ? "checked in ✔" : "check in when you arrive →"}</a>`).join("");
+      box.innerHTML = obAlert + irAlert + lateAlert + holAlert + retCard + newsCard + shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + holCard + `<a class="btn block" href="#/shift">🔄 Change shift</a><a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>`;
     });
   } catch (e) { el.innerHTML = errBox(e); }
 }
@@ -169,7 +186,7 @@ async function viewFile(tok) {
     const avail = types.filter((x) => x.available), off = types.filter((x) => !x.available);
     const t = todayStr();
     el.innerHTML = `<form id="ff" class="form">
-      <label>Leave type<select name="type" required>${avail.map((x) => `<option value="${esc(x.code)}">${esc(x.display_name)}</option>`).join("")}</select>
+      <label>Type<select name="type" required>${avail.map((x) => `<option value="${esc(x.code)}">${esc(x.display_name)}</option>`).join("")}</select>
         ${off.length ? `<small>Not available to you: ${off.map((x) => `${esc(x.display_name)} (${esc(x.why)})`).join(", ")}</small>` : ""}</label>
       <div id="tnote"></div>
       <div id="tdetail"></div>
@@ -181,6 +198,7 @@ async function viewFile(tok) {
       <div id="chk"></div><div id="h1warn"></div><div id="ferr"></div><button class="btn primary block" type="submit">Sign &amp; submit</button><p class="s" style="text-align:center">Your fingerprint, face or device PIN is your signature on the form.</p>
       <p class="fine" id="routefine">Your request goes to your approver automatically. You'll see its progress under “My requests”. <a href="#/policies">Leave rules &amp; memos →</a></p></form>`;
     const f = document.getElementById("ff");
+    const pre = new URLSearchParams(location.hash.split("?")[1] || "").get("type"); if (pre && avail.some((x) => x.code === pre)) f.type.value = pre;
     const typeOf = () => types.find((x) => x.code === f.type.value) || {};
     let touchedDays = false;
     // per-type extra questions (kept in the form while switching types)
@@ -195,6 +213,11 @@ async function viewFile(tok) {
             <label class="check"><input type="radio" name="mkind" value="miscarriage"><span>Miscarriage / pregnancy loss</span></label>
             <label id="trrow">Days given to the child's father (0–7)<input type="number" name="transfer" min="0" max="7" step="1" value="0"></label></fieldset>`
         : c === "PATERNITY" ? `<label>Date of the delivery or miscarriage<input type="date" name="delivery"></label>`
+        : c === "OB" ? `<fieldset class="fs"><legend>Official business</legend><label>Where are you going? (company / site / address)<input name="obdest" maxlength="300" placeholder="e.g. J Tower, Ortigas — client site measurement"></label>
+            <div class="two"><label>Time out <span class="opt">(expected)</span><input type="time" name="obout"></label><label>Time back <span class="opt">(expected)</span><input type="time" name="obin"></label></div>
+            <p class="s">On the day, open the app at the place and check in with a photo. Choose how your location is shown:</p>
+            <label class="check"><input type="radio" name="obmode" value="geotag" checked><span><b>Geo-tag</b> — one photo with the location when you arrive</span></label>
+            <label class="check"><input type="radio" name="obmode" value="tracking"><span><b>Tracking</b> — arrival photo, then your location is recorded while the app is open</span></label></fieldset>`
         : c === "VL" ? `<label class="check"><input type="checkbox" name="emerg"><span>Emergency leave — I told my supervisor and HR within the first hour of the working day (medical or family reason)</span></label>` : "";
       const cal = ty.day_basis === "calendar";
       f.days.readOnly = cal; f.days.step = cal ? "1" : "0.5";
@@ -203,7 +226,7 @@ async function viewFile(tok) {
         ? "This goes straight to HR. Your supervisor and manager only see “Leave (confidential)” and the dates."
         : `Your request goes to your approver automatically. You'll see its progress under “My requests”. <a href="#/policies">Leave rules &amp; memos →</a>`;
       d.querySelectorAll("input,select").forEach((x) => x.addEventListener("change", () => { if (x.name === "mkind") document.getElementById("trrow").hidden = x.value !== "birth"; check(); }));
-      d.querySelectorAll("input[name=deceased]").forEach((x) => x.addEventListener("input", check));
+      d.querySelectorAll("input[name=deceased],input[name=obdest]").forEach((x) => x.addEventListener("input", check));
     };
     const detail = () => {
       const c = f.type.value;
@@ -211,6 +234,7 @@ async function viewFile(tok) {
       if (c === "MATERNITY") { const k = (f.querySelector("input[name=mkind]:checked") || {}).value || "birth"; return { kind: k, transfer_days: k === "birth" ? Number(f.transfer.value || 0) : 0 }; }
       if (c === "PATERNITY") return { delivery_date: f.delivery.value || null };
       if (c === "VL") return f.emerg && f.emerg.checked ? { emergency: true } : null;
+      if (c === "OB") return { destination: f.obdest.value.trim(), time_out: f.obout.value || null, time_in: f.obin.value || null, mode: (f.querySelector("input[name=obmode]:checked") || {}).value || "geotag" };
       return null;
     };
     const sync = () => {
@@ -314,7 +338,8 @@ async function renderDetail(el, id, tok, mode) {
     const detailRows = [
       dt.relationship ? `<dt>Deceased</dt><dd>${esc(dt.deceased_name || "")} (${esc(REL[dt.relationship] || dt.relationship)})</dd>` : "",
       dt.kind ? `<dt>Maternity</dt><dd>${dt.kind === "miscarriage" ? "Miscarriage" : "Childbirth"}${Number(dt.transfer_days) ? ` · ${num(dt.transfer_days)} day(s) given to the father` : ""}</dd>` : "",
-      dt.delivery_date ? `<dt>Delivery date</dt><dd>${esc(fmtDate(dt.delivery_date))}</dd>` : "" ].join("");
+      dt.delivery_date ? `<dt>Delivery date</dt><dd>${esc(fmtDate(dt.delivery_date))}</dd>` : "",
+      dt.destination ? `<dt>Going to</dt><dd>${esc(dt.destination)}${dt.time_out || dt.time_in ? `<br><small>Out ${esc(dt.time_out || "–")} · back ${esc(dt.time_in || "–")}</small>` : ""}<br><small>Location: ${dt.mode === "tracking" ? "tracking" : "geo-tag"}</small></dd>` : "" ].join("");
     const lastCounter = [...apps].reverse().find((a) => a.action === "COUNTERED");
     let actions = "";
     if (mine && r.status === "COUNTERED" && lastCounter) {
@@ -355,6 +380,7 @@ async function renderDetail(el, id, tok, mode) {
       ${r.vl_h1_over ? `<dt>Note</dt><dd class="warnt">Uses more than half of the year's Vacation Leave before July 1 — this needs ${mine ? "your approver's" : "your"} approval (company policy: only half can be used January–June).</dd>` : ""}
       ${r.approver && PENDING_FOR_APPROVER.includes(r.status) ? `<dt>Waiting on</dt><dd>${esc(r.approver.full_name)}</dd>` : ""}</dl></div>
       <button class="btn block" data-act="pdf">Download form (PDF)</button>
+      ${r.leave_types?.code === "OB" ? '<div id="obck"></div>' : ""}
       ${actions}<h3>History</h3>${tl ? `<ol class="tl">${tl}</ol>` : `<div class="empty small">No decisions yet.</div>`}`;
     const hf = el.querySelector("#hform");
     if (hf) {
@@ -366,6 +392,7 @@ async function renderDetail(el, id, tok, mode) {
         catch (e) { hf.querySelector(".eerr").innerHTML = errBox(e); } };
     }
     el.__apps = apps; wireDetail(el, r);
+    const obk = el.querySelector("#obck"); if (obk) renderObCheckins(obk, r.id, { rpc, esc, toast, errBox });
   } catch (e) { el.innerHTML = errBox(e); }
 }
 
@@ -501,6 +528,19 @@ async function viewIrPage(tok) {
   await renderIr(el, { rpc, esc, toast, errBox, state });
   state.irWaiting = await rpc("iaf_ir_waiting_count").catch(() => state.irWaiting);
 }
+async function viewObPage(tok) {
+  shell("ob", "Official business", loading());
+  const el = document.querySelector(".content"); if (tok !== navToken) return;
+  const body = document.createElement("div"); el.querySelector(".loading")?.remove(); el.appendChild(body);
+  await renderOb(body, { rpc, esc, toast, errBox, state });
+}
+async function viewRolesPage(tok) {
+  if (!state.isAdmin) { location.replace("#/"); return; }
+  shell("roles", "View by role", loading(), true);
+  const el = document.querySelector(".content"); if (tok !== navToken) return;
+  const body = document.createElement("div"); el.querySelector(".loading")?.remove(); el.appendChild(body);
+  renderRoles(body, { esc, state, onPreview: (r) => { state.preview = r; if (location.hash === "#/" || location.hash === "") route(); else location.hash = "#/"; } });
+}
 async function viewLatePage(tok) {
   if (!state.late || !state.late.can_see) { location.replace("#/"); return; }
   shell("late", "Late leave filings", loading(), true);
@@ -573,6 +613,8 @@ async function route() {
   if (p === "coc") return viewCocPage(tok);
   if (p === "ir") return viewIrPage(tok);
   if (p === "late") return viewLatePage(tok);
+  if (p === "roles") return viewRolesPage(tok);
+  if (p === "ob") return viewObPage(tok);
   if (p === "credits") return viewCreditsPage(tok);
   return viewHome(tok);
 }
@@ -581,7 +623,10 @@ document.addEventListener("click", async (ev) => { $toast.className = "";
   if (nseen) { nseen.closest(".notice").remove(); try { await rpc("iaf_shift_change_news_seen", { p_id: nseen.dataset.newsseen }); } catch {} return; }
   const ack = ev.target.closest("[data-ack]");
   if (ack) { ack.disabled = true; try { await rpc("iaf_announcement_ack", { p_id: ack.dataset.ack }); toast("Thank you ✔"); route(); } catch (e) { toast(e.message, true); ack.disabled = false; } return; }
-  if (ev.target.closest("[data-act=signout]")) { await signOut(); state.me = null; state.isApprover = false; state.isAdmin = false; state.canPeople = false; state.empCompany = null; state.pending = 0; location.hash = "#/"; route(); }
+  if (ev.target.closest("[data-more]")) { const sh = document.getElementById("moresheet"); if (sh) sh.hidden = !sh.hidden; return; }
+  if (ev.target.closest("#moresheet a[href]")) { const sh = document.getElementById("moresheet"); if (sh) sh.hidden = true; }
+  if (ev.target.closest("[data-act=endpreview]")) { state.preview = null; route(); return; }
+  if (ev.target.closest("[data-act=signout]")) { state.preview = null; await signOut(); state.me = null; state.isApprover = false; state.isAdmin = false; state.canPeople = false; state.empCompany = null; state.pending = 0; location.hash = "#/"; location.reload(); }
 });
 window.addEventListener("hashchange", route);
 async function bootSignedIn() {
@@ -635,7 +680,9 @@ async function downloadForm(r, apps, btn) {
     const pdf = buildAtrfPdf({
       companyName: emp.companies?.name || "", companyCode: emp.companies?.short_code || "", controlNo: "QC26-001", ref: "LV-" + String(r.id).slice(0, 8).toUpperCase(),
       name: emp.full_name || r.requester?.full_name || "", dateFiled: r.created_at, designation: emp.roles?.title || "", department: emp.departments?.name || "",
-      types: { vl: code === "VL", sl: code === "SL", unpaid: !!r.is_unpaid_loa_conversion },
+      types: { vl: code === "VL", sl: code === "SL", unpaid: !!r.is_unpaid_loa_conversion || code === "UNPAID_LOA", bday: code === "BIRTHDAY", solo: code === "SOLO_PARENT",
+        bereave: code === "BEREAVEMENT", matpat: code === "MATERNITY" || code === "PATERNITY", wom: code === "RA9710", vawc: code === "RA9262", wfh: code === "WFH", ob: code === "OB" },
+      destination: r.detail?.destination || "",
       purpose: r.reason || "", from: fmtDate(r.start_date), to: fmtDate(r.end_date), total: `${num(r.days_requested)} day(s)`,
       decision, rejectReason: decision === "REJECTED" ? (final?.notes || "") : "", dateActioned: decision ? (final?.created_at || null) : null,
       approverSig: lastSig(["APPROVE", "REJECT"]), employeeSig: lastSig(["ACCEPT", "SUBMIT"]), hrSig: null, balVL: left("VL"), balSL: left("SL") });

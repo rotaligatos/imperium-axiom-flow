@@ -5,7 +5,7 @@
 //    the Head of Plant Operation and HR sign. The Head sees every report and acts only when asked. HR may restrict a report.
 //  IT Incident Report (FO-MIS-02): reporter -> immediate supervisor -> IT representative (assessment) -> IT Manager closes.
 //  Both forms can be downloaded blank (paper filing) or filled (PDF).
-import { fnCall, storageUpload, storageBlob, rest } from "./api.js";
+import { fnCall, storageUpload, openStoredFile, rest } from "./api.js";
 import { buildGeneralIrPdf, buildItIrPdf, downloadPdf, NATURE, IT_ASSETS, IT_TYPES, ROLE_LABEL, COMPANY_NAMES } from "./irpdf.js";
 import { sign } from "./sign.js";
 import { ladder } from "./coc.js";
@@ -47,7 +47,8 @@ export async function renderIr(el, ctx) {
       : `<div class="empty">${q.box === "waiting" ? "🎉 Nothing waiting for you." : "No incident reports."}</div>`}</section>
       <section class="pane-detail" id="irdet">${q.sel ? '<div class="empty small">Loading…</div>' : '<div class="empty">Select a report to see it.</div>'}</section></div>`;
   el.querySelectorAll("[data-box]").forEach((b) => (b.onclick = () => { q.box = b.dataset.box; q.sel = null; reload(); }));
-  let t; el.querySelector("#irq").oninput = (e) => { clearTimeout(t); t = setTimeout(() => { q.search = e.target.value.trim(); reload(); }, 350); };
+  let t; el.querySelector("#irq").oninput = (e) => { clearTimeout(t); t = setTimeout(() => { q.search = e.target.value.trim(); q.focusSearch = true; reload(); }, 350); };
+  if (q.focusSearch) { q.focusSearch = false; const i = el.querySelector("#irq"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
   const nb = el.querySelector("#irnew"); if (nb) nb.onclick = () => { q.mode = "new"; q.draft = { offenses: [], kind: null }; reload(); };
   el.querySelector("#irkind").onchange = (e) => { q.kind = e.target.value; q.sel = null; reload(); };
   el.querySelectorAll("[data-blank]").forEach((b) => (b.onclick = async () => {
@@ -202,7 +203,8 @@ async function renderDetail(box, ctx, reload) {
   const itData = () => Object.fromEntries(["asset_tag", "accountability_no", "account", "platform", "findings", "impact", "action_taken", "recommendation", "it_status"].map((k) => [k, val("#i_" + k)]));
   box.querySelectorAll("[data-a]").forEach((b) => (b.onclick = async () => {
     const a = b.dataset.a;
-    if (a === "endorse" || a === "return") return act(a, val("#rnote") || (a === "return" ? prompt("What should the filer add or correct?") : ""));
+    if (a === "endorse") return act(a, val("#rnote"));
+    if (a === "return") { const n = val("#rnote") || prompt("What should the filer add or correct?"); if (!n) return; return act(a, n); }
     if (a === "resubmit") return act(a, val("#rnote"), { description: val("#rdesc") });
     if (a === "issue_nte") return act(a, val("#rnote"));
     if (a === "close") { const n = prompt("Closing note (optional): what was agreed / corrective action done?"); if (n === null) return; return act(a, n); }
@@ -222,13 +224,13 @@ async function renderDetail(box, ctx, reload) {
     if (a === "request_head") return act(a, val("#hqnote"));
     if (a === "withdraw") { const n = prompt("Why is the report withdrawn?"); if (n) act(a, n); return; }
     if (a === "restrict") { const n = prompt(d.restricted ? "Lift the restriction? Add a note (optional)." : "Restrict this report to HR and the Head of Plant Operation. Reason:"); if (n === null) return; return act(a, n, { restricted: !d.restricted }); }
-    if (a === "sign") { b.disabled = true; b.textContent = "Waiting for your fingerprint / face / PIN…";
-      try { const sid = await sign("APPROVE", ""); await act("sign", null, {}, sid); } catch (e) { err.innerHTML = errBox(e); b.disabled = false; b.textContent = "Sign"; } return; }
+    if (a === "sign") { const label = b.textContent; b.disabled = true; b.textContent = "Waiting for your fingerprint / face / PIN…";
+      try { const sid = await sign("APPROVE", ""); await act("sign", null, {}, sid); } catch (e) { err.innerHTML = errBox(e); b.disabled = false; b.textContent = label; } return; }
   }));
   box.querySelector("[data-pdf]").onclick = () => { try { reportPdf(d); } catch (e) { toast(e.message || "Could not make the PDF", true); } };
   const doff = box.querySelector("#doff"), dpen = box.querySelector("#dpen");
   if (doff && dpen && !d.final_penalty) { const sync = () => { const p = doff.selectedOptions[0]?.dataset.pen; if (p && PENALTIES.includes(p)) dpen.value = p; }; doff.onchange = sync; sync(); }
-  box.querySelectorAll("[data-file]").forEach((b) => (b.onclick = async () => { try { const blob = await storageBlob(BUCKET, b.dataset.file); const u = URL.createObjectURL(blob); window.open(u, "_blank") || (location.href = u); } catch (e) { toast(e.message, true); } }));
+  box.querySelectorAll("[data-file]").forEach((b) => (b.onclick = async () => { try { await openStoredFile(BUCKET, b.dataset.file); } catch (e) { toast(e.message, true); } }));
   box.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => pick(async (f) => { await upload(rpc, d.id, b.dataset.up, f); toast("File attached ✔"); reload(); }, toast)));
   const ao = box.querySelector("[data-addoff]"); if (ao) ao.onclick = () => offensePicker(box.querySelector("#irai"), ctx, async (o) => { await rpc("iaf_ir_act2", { p_id: d.id, p_action: "add_offense", p_note: null, p_data: { offense_id: o.id, source: "reviewer" }, p_signature: null }); toast("Offense added ✔"); reload(); });
   const ai = box.querySelector("[data-ai]"); if (ai) ai.onclick = async () => {

@@ -19,6 +19,7 @@ export async function renderOrg(el, { rpc, esc, toast, errBox, state }) {
   el.innerHTML = `<div class="empty">Loading…</div>`;
   let companies;
   try { companies = await rpc("iaf_my_companies"); } catch (e) { el.innerHTML = errBox(e); return; }
+  if (!companies || !companies.length) { el.innerHTML = `<div class="empty">No company available.</div>`; return; }
   const cur = companies.find((c) => c.id === state.orgCompany) || companies.find((c) => c.id === state.empCompany) || companies[0]; state.orgCompany = cur.id;
   let dir, lk, photos, extras;
   try { [dir, lk, photos, extras] = await Promise.all([rpc("iaf_employee_directory", { p_company: cur.id }), rpc("iaf_org_lookups", { p_company: cur.id }), rpc("iaf_employee_photos", { p_company: cur.id }), rpc("iaf_employee_extras", { p_company: cur.id })]); }

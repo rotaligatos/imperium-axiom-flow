@@ -88,6 +88,18 @@ export async function storageUpload(bucket, path, file) {
   }
 }
 export const storageBlob = async (bucket, path) => (await storageCall(`object/authenticated/${bucket}/${path}`)).blob();
+// Opens a stored file safely: only PDFs and real photos (checked by their first bytes) open in a tab, with a fixed type.
+// Anything else is downloaded, never shown inside the app (an uploaded HTML / SVG file could otherwise run code).
+export async function openStoredFile(bucket, path, name) {
+  const blob = await storageBlob(bucket, path), head = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
+  const is = (...b) => b.every((v, i) => v === null || head[i] === v);
+  const type = is(0x25, 0x50, 0x44, 0x46) ? "application/pdf" : is(0xff, 0xd8, 0xff) ? "image/jpeg" : is(0x89, 0x50, 0x4e, 0x47) ? "image/png"
+    : is(0x47, 0x49, 0x46, 0x38) ? "image/gif" : is(0x52, 0x49, 0x46, 0x46, null, null, null, null, 0x57, 0x45, 0x42, 0x50) ? "image/webp" : null;
+  const url = URL.createObjectURL(new Blob([blob], { type: type || "application/octet-stream" }));
+  if (type && window.open(url, "_blank")) { setTimeout(() => URL.revokeObjectURL(url), 60000); return; }
+  const a = document.createElement("a"); a.href = url; a.download = name || path.split("/").pop(); document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
 
 // ---- Edge Functions (server-side helpers such as the AI memo reader). Runs as the signed-in user. ----
 export async function fnCall(name, body, timeoutMs = 120000) {

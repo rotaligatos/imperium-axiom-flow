@@ -7,6 +7,7 @@ export async function renderHolidays(el, ctx) {
   const { rpc, esc, toast, errBox, state } = ctx;
   el.innerHTML = `<div class="empty">Loading…</div>`;
   let companies; try { companies = await rpc("iaf_my_companies"); } catch (e) { el.innerHTML = errBox(e); return; }
+  if (!companies || !companies.length) { el.innerHTML = `<div class="empty">No company available.</div>`; return; }
   const cur = companies.find((c) => c.id === st.co) || companies.find((c) => c.id === state.empCompany) || companies[0]; st.co = cur.id;
   let list; try { list = await rpc("iaf_holiday_list", { p_company: cur.id, p_year: st.year }); } catch (e) { el.innerHTML = errBox(e); return; }
   const reload = () => renderHolidays(el, ctx), proposed = list.filter((h) => h.status === "proposed").length;

@@ -20,6 +20,7 @@ export async function renderNotices(el, ctx) {
   const { rpc, esc, toast, errBox, state } = ctx;
   el.innerHTML = `<div class="empty">Loading…</div>`;
   let companies; try { companies = await rpc("iaf_my_companies"); } catch (e) { el.innerHTML = errBox(e); return; }
+  if (!companies || !companies.length) { el.innerHTML = `<div class="empty">No company available.</div>`; return; }
   const cur = companies.find((c) => c.id === co) || companies.find((c) => c.id === state.empCompany) || companies[0]; co = cur.id;
   let list, lk; try { [list, lk] = await Promise.all([rpc("iaf_announcement_list", { p_company: cur.id }), rpc("iaf_org_lookups", { p_company: cur.id })]); } catch (e) { el.innerHTML = errBox(e); return; }
   const depts = lk.departments || [], reload = () => renderNotices(el, ctx);

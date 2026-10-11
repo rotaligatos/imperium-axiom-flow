@@ -4,7 +4,7 @@
 // - Upload first: the AI reads the memo and fills the form (topics with reasons, questions when unsure,
 //   the memo it replaces, possible conflicts with company/HR policy, parts of the app it may change).
 // - Built for hundreds of memos: search inside the memo text, filters, pages, detail beside the list.
-import { storageUpload, storageBlob, fnCall } from "./api.js";
+import { storageUpload, storageBlob, fnCall, openStoredFile } from "./api.js";
 
 const BUCKET = "iaf-memos", PAGE = 25;
 const VIS = { everyone: "Everyone", supervisors: "Supervisors and up", hr: "HR only (confidential)" };
@@ -59,7 +59,8 @@ export async function renderPolicies(el, ctx) {
   el.innerHTML = filt + `<div class="split ${q.sel ? "has-detail" : ""}"><section class="pane-list">${pager}<div class="list">${rows.length ? rows.map(row).join("") : `<div class="empty">No memos found.</div>`}</div>${total > PAGE ? pager : ""}</section>
     <section class="pane-detail" id="pdet">${q.sel ? `<div class="empty loading">Loading…</div>` : `<div class="empty">Select a memo to read it.</div>`}</section></div>`;
 
-  let t; const s = el.querySelector("#psearch"); s.oninput = () => { clearTimeout(t); t = setTimeout(() => { q.search = s.value; q.offset = 0; reload(); }, 450); };
+  let t; const s = el.querySelector("#psearch"); s.oninput = () => { clearTimeout(t); t = setTimeout(() => { q.search = s.value; q.offset = 0; q.focusSearch = true; reload(); }, 450); };
+  if (q.focusSearch) { q.focusSearch = false; s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
   const on = (id, fn) => { const x = el.querySelector(id); if (x) x.onchange = x.onclick = fn; };
   el.querySelector("#ptopic").onchange = (e) => { q.topic = e.target.value; q.offset = 0; reload(); };
   el.querySelector("#pco").onchange = (e) => { q.company = e.target.value; q.offset = 0; reload(); };
@@ -101,7 +102,7 @@ async function renderDetail(box, ctx, reload) {
   box.querySelector("[data-back]").onclick = () => { q.sel = null; reload(); };
   box.querySelectorAll("[data-go]").forEach((a) => (a.onclick = () => { q.sel = a.dataset.go; q.status = "all"; reload(); }));
   const full = box.querySelector("[data-full]"); if (full) full.onclick = () => { const p = box.querySelector(".fulltext"); p.hidden = !p.hidden; full.textContent = p.hidden ? "Show full text" : "Hide full text"; };
-  const op = box.querySelector("[data-open]"); if (op) op.onclick = async () => { op.disabled = true; try { const blob = await storageBlob(BUCKET, op.dataset.open); const url = URL.createObjectURL(blob); window.open(url, "_blank") || (location.href = url); } catch (x) { toast(x.message, true); } op.disabled = false; };
+  const op = box.querySelector("[data-open]"); if (op) op.onclick = async () => { op.disabled = true; try { await openStoredFile(BUCKET, op.dataset.open); } catch (x) { toast(x.message, true); } op.disabled = false; };
   box.querySelectorAll("[data-st]").forEach((b) => (b.onclick = async () => { if (b.dataset.st === "retired" && !confirm("Retire this memo? Employees will no longer see it.")) return; try { await rpc("iaf_policy_status", { p_id: d.id, p_status: b.dataset.st }); toast("Done ✔"); reload(); } catch (x) { toast(x.message, true); } }));
   const af = box.querySelector("[data-aifill]"); if (af) af.onclick = async () => {
     af.disabled = true; af.textContent = "Reading the memo… (up to a minute)";
