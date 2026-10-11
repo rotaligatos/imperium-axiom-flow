@@ -111,7 +111,9 @@ export async function renderShiftHr(box, ctx, companyId) {
 export async function renderShiftFlow(box, ctx, companyId) {
   const { rpc, esc, toast, errBox } = ctx;
   let g; try { g = await rpc("iaf_shift_flow_get", { p_company: companyId }); } catch (e) { box.innerHTML = errBox(e); return; }
-  box.innerHTML = `<h3>Shift changes: final approver</h3><p class="s">Requests go to the Manager first, then to this person (Head of Plant Operation) for the final approval. If none is set, the Manager's approval is final.</p>
-    <div class="between"><select id="fhead"><option value="">— none —</option>${g.candidates.map((c) => `<option value="${esc(c.user_id)}"${c.user_id === g.head_user_id ? " selected" : ""}>${esc(c.name)}</option>`).join("")}</select><button class="btn" id="fsave">Save</button></div><div class="eerr"></div>`;
-  box.querySelector("#fsave").onclick = async () => { try { await rpc("iaf_shift_flow_set", { p_company: companyId, p_user: box.querySelector("#fhead").value || null }); toast("Saved ✔"); } catch (e) { box.querySelector(".eerr").innerHTML = errBox(e); } };
+  const now = g.effective_name ? `<b>${esc(g.effective_name)}</b> — ${g.source === "setting" ? "chosen below" : "from the organizational chart"}` : "<b>nobody</b> — no Head of Plant Operation with a login on the organizational chart";
+  box.innerHTML = `<h3>Head of Plant Operation</h3><p class="s">Final approver of shift changes and signer of incident report decisions. Taken from the organizational chart. Pick someone below only to override it.</p>
+    <p>Now: ${now}</p>
+    <div class="between"><select id="fhead"><option value="">— use the organizational chart —</option>${g.candidates.map((c) => `<option value="${esc(c.user_id)}"${c.user_id === g.head_user_id ? " selected" : ""}>${esc(c.name)}</option>`).join("")}</select><button class="btn" id="fsave">Save</button></div><div class="eerr"></div>`;
+  box.querySelector("#fsave").onclick = async () => { try { await rpc("iaf_shift_flow_set", { p_company: companyId, p_user: box.querySelector("#fhead").value || null }); toast("Saved ✔"); renderShiftFlow(box, ctx, companyId); } catch (e) { box.querySelector(".eerr").innerHTML = errBox(e); } };
 }
