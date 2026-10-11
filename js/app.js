@@ -10,6 +10,7 @@ import { renderHolidays } from "./holidays.js";
 import { renderPolicies } from "./policies.js";
 import { renderCredits } from "./credits.js";
 import { renderCoc } from "./coc.js";
+import { renderIr } from "./ir.js";
 import { mountPad, pngToPdfImage } from "./sigpad.js";
 import { sign, registerDevice, myDevices, canSign } from "./sign.js";
 import { isConfigured, getSession, userId, signIn, signOut, rest, rpc } from "./api.js";
@@ -53,6 +54,8 @@ async function loadMe() {
   const hr = (await rest("iaf_hr_staff?select=user_id").catch(() => [])).length > 0;
   state.canPeople = state.isAdmin || hr;            // Employees page: administrators and people marked as HR staff
   state.canCoc = await rpc("iaf_coc_can_see").catch(() => false);   // Code of Conduct guide: supervisors and up, HR, admin
+  state.irWaiting = await rpc("iaf_ir_waiting_count").catch(() => 0);
+  state.irAny = state.canCoc || state.irWaiting > 0 || ((await rpc("iaf_ir_list", { p_box: "all", p_employee: null, p_status: null, p_q: null }).catch(() => [])) || []).length > 0;
 }
 async function loadTypes() {
   if (!state.types) state.types = await rest("leave_types?is_active=eq.true&select=id,code,display_name,tracks_balance&order=display_name");
@@ -72,7 +75,7 @@ async function refreshBadge() {
 // ---------- shell ----------
 function shell(active, title, body, wide = false) {
   const nav = [["#/", "Home", "🏠", "home"], ["#/file", "File leave", "➕", "file"], ["#/requests", "My requests", "📄", "requests"],
-    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ["#/shift", "Change shift", "🔄", "shift"], ["#/time", "Half-day / Undertime", "⏱️", "time"], ["#/policies", "Policies & Memos", "📚", "policies"], ...(state.canCoc ? [["#/coc", "Code of Conduct", "⚖️", "coc"]] : []), ["#/account", "Account", "👤", "account"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/credits", "Leave credits", "🧮", "credits"], ["#/org", "Org chart", "🗂️", "org"], ["#/schedules", "Schedules", "🕒", "schedules"], ["#/notices", "Notices", "📢", "notices"], ["#/holidays", "Holidays", "🎌", "holidays"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
+    ["#/approvals", "Approvals", "✅", "approvals"], ["#/calendar", "Calendar", "📅", "calendar"], ["#/shift", "Change shift", "🔄", "shift"], ["#/time", "Half-day / Undertime", "⏱️", "time"], ["#/policies", "Policies & Memos", "📚", "policies"], ...(state.canCoc ? [["#/coc", "Code of Conduct", "⚖️", "coc"]] : []), ...(state.irAny ? [["#/ir", "Incident reports", "📝", "ir"]] : []), ["#/account", "Account", "👤", "account"], ...(state.canPeople ? [["#/employees", "Employees", "👥", "employees"], ["#/credits", "Leave credits", "🧮", "credits"], ["#/org", "Org chart", "🗂️", "org"], ["#/schedules", "Schedules", "🕒", "schedules"], ["#/notices", "Notices", "📢", "notices"], ["#/holidays", "Holidays", "🎌", "holidays"]] : []), ...(state.isAdmin ? [["#/admin", "Admin", "⚙️", "admin"]] : [])];
   const links = nav.map(([h, t, ic, k]) => `<a href="${h}" class="${active === k ? "on" : ""}" ${k === "approvals" ? 'data-approver-nav ' + (state.isApprover ? "" : "hidden") : ""}>
       <span class="ic" aria-hidden="true">${ic}</span><span>${t}</span>${k === "approvals" ? `<b class="badge" data-badge ${state.pending ? "" : "hidden"}>${state.pending}</b>` : ""}</a>`).join("");
   $app.innerHTML = `<div class="layout">
@@ -141,7 +144,8 @@ async function viewHome(tok) {
       const newsCard = (Array.isArray(shiftNews) ? shiftNews : []).map((r) => `<div class="notice"><b>Shift change approved:</b> ${esc(r.schedule)} for ${esc(r.dept ? "department " + r.dept : r.people.slice(0, 3).join(", ") + (r.people.length > 3 ? " +" + (r.people.length - 3) : ""))}, from ${esc(r.start_date)}${r.end_date ? " to " + esc(r.end_date) : ""} <button class="link" data-newsseen="${esc(r.id)}">Got it</button></div>`).join("");
       const holAlert = halert && halert.proposed > 0 && state.canPeople ? `<a class="notice" href="#/holidays"><b>${halert.proposed}</b> holiday${halert.proposed > 1 ? "s" : ""} waiting for your confirmation →</a>` : "";
       const holCard = Array.isArray(hols) && hols.length ? `<div class="card"><h3>Coming holidays</h3>${hols.slice(0, 4).map((h) => `<div class="row"><span>${esc(new Date(h.date + "T00:00:00").toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" }))}</span><span>${esc(h.name)}${h.kind === "special_working" ? " (work day)" : ""}</span></div>`).join("")}</div>` : "";
-      box.innerHTML = holAlert + retCard + newsCard + shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + holCard + `<a class="btn block" href="#/shift">🔄 Change shift</a><a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>`;
+      const irAlert = state.irWaiting > 0 ? `<a class="notice" href="#/ir"><b>${state.irWaiting}</b> incident report${state.irWaiting > 1 ? "s" : ""} waiting for you →</a>` : "";
+      box.innerHTML = irAlert + holAlert + retCard + newsCard + shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + holCard + `<a class="btn block" href="#/shift">🔄 Change shift</a><a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>`;
     });
   } catch (e) { el.innerHTML = errBox(e); }
 }
@@ -485,6 +489,12 @@ async function viewPoliciesPage(tok) {
   const el = document.querySelector(".content"); if (tok !== navToken) return;
   await renderPolicies(el, { rpc, esc, toast, errBox, state });
 }
+async function viewIrPage(tok) {
+  shell("ir", "Incident reports", loading(), true);
+  const el = document.querySelector(".content"); if (tok !== navToken) return;
+  await renderIr(el, { rpc, esc, toast, errBox, state });
+  state.irWaiting = await rpc("iaf_ir_waiting_count").catch(() => state.irWaiting);
+}
 async function viewCocPage(tok) {
   if (!state.canCoc) { location.replace("#/"); return; }
   shell("coc", "Code of Conduct", loading(), true);
@@ -528,6 +538,7 @@ async function route() {
   if (p === "account") return viewAccount(tok);
   if (p === "policies") return viewPoliciesPage(tok);
   if (p === "coc") return viewCocPage(tok);
+  if (p === "ir") return viewIrPage(tok);
   if (p === "credits") return viewCreditsPage(tok);
   return viewHome(tok);
 }

@@ -204,3 +204,9 @@ label.tick{display:inline-flex!important;flex-direction:row;align-items:center;g
 .rung.dis{background:var(--badb);color:var(--bad);border-color:transparent}
 .why{margin-top:8px;font-size:.92rem}
 .cochead .cotabs{margin-top:8px}
+/* Incident reports */
+.irbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.irbar input{flex:1;min-width:180px}
+.pre{white-space:pre-wrap}
+.flist{list-style:none;padding:0;margin:0 0 12px}.flist li{padding:6px 0;border-bottom:1px solid var(--line)}
+.list.pick{max-height:260px;overflow:auto;margin-bottom:8px}
