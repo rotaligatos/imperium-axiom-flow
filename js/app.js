@@ -322,6 +322,14 @@ async function renderDetail(el, id, tok, mode) {
         <label><span>Reason for the change <span class="opt">(optional)</span></span><textarea name="cr" rows="2" maxlength="500" placeholder="e.g. We have a deadline that week"></textarea></label>
         <button class="btn primary block" type="submit">Send counter-proposal</button></form></div>`;
     }
+    if (priv && priv.is_hr && r.status === "PENDING_HR_MANAGER") {
+      actions += `<div class="card" id="handover"><h3>Who handles this case?</h3>
+        <p class="s">Only HR sees the details. If a supervisor or manager needs to decide, hand the case to them: they will see the type and the reason. You can take it back while it is waiting.</p>
+        <form class="form" id="hform"><label>Hand to<select name="u"><option value="">Loading…</option></select></label>
+        <label><span>Why <span class="opt">(required when handing to a non-HR person)</span></span><input name="note" maxlength="300"></label>
+        <div class="eerr"></div><button class="btn" type="submit">Hand over</button></form></div>`;
+    }
+    if (priv && priv.delegate && !mine) actions = `<div class="alert">HR handed this case to <b>${esc(priv.delegate)}</b>${priv.delegate_note ? `: “${esc(priv.delegate_note)}”` : ""}</div>` + actions;
     if (mine && CANCELLABLE.includes(r.status) && r.status !== "COUNTERED") actions += `<button class="btn danger block" data-act="cancel">Cancel this request</button>`;
     const tl = apps.map((a) => `<li><b>${esc(a.approver?.full_name || "Approver")}</b> ${a.action === "APPROVED" ? "approved" : a.action === "REJECTED" ? "rejected" : "proposed other dates"}
       <small>${esc(a.tier.replace("_", " ").toLowerCase())} · ${esc(new Date(a.created_at).toLocaleString())}</small>${a.notes ? `<em>“${esc(a.notes)}”</em>` : ""}</li>`).join("");
@@ -336,6 +344,15 @@ async function renderDetail(el, id, tok, mode) {
       ${r.approver && PENDING_FOR_APPROVER.includes(r.status) ? `<dt>Waiting on</dt><dd>${esc(r.approver.full_name)}</dd>` : ""}</dl></div>
       <button class="btn block" data-act="pdf">Download form (PDF)</button>
       ${actions}<h3>History</h3>${tl ? `<ol class="tl">${tl}</ol>` : `<div class="empty small">No decisions yet.</div>`}`;
+    const hf = el.querySelector("#hform");
+    if (hf) {
+      rpc("iaf_leave_conf_people", { p_request: r.id }).then((ppl) => {
+        hf.u.innerHTML = ppl.map((x) => `<option value="${esc(x.id)}" ${x.id === r.current_approver_id ? "selected" : ""}>${esc(x.full_name)}${x.hr ? " (HR)" : x.title ? " — " + esc(x.title) : ""}</option>`).join("");
+      }).catch((e) => { hf.querySelector(".eerr").innerHTML = errBox(e); });
+      hf.onsubmit = async (ev) => { ev.preventDefault(); hf.querySelector(".eerr").innerHTML = "";
+        try { await rpc("iaf_leave_conf_assign", { p_request: r.id, p_user: hf.u.value, p_note: hf.note.value || null }); toast("Handed over ✔"); route(); }
+        catch (e) { hf.querySelector(".eerr").innerHTML = errBox(e); } };
+    }
     el.__apps = apps; wireDetail(el, r);
   } catch (e) { el.innerHTML = errBox(e); }
 }
