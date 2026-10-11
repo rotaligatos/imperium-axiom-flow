@@ -93,10 +93,31 @@ async function table(body, cur, { rpc, esc, toast, errBox }, reload) {
         <label>Level<select name="b">${Object.entries(BAND).map(([k, t]) => `<option value="${k}">${t}</option>`).join("")}</select></label></div>
         <div class="two"><label>From years of service<input type="number" name="y" min="0" max="60" step="0.5" value="0"></label><label>Days per year<input type="number" name="d" min="0" max="366" step="0.5" required></label></div>
         <div class="two"><label>Applies to<select name="co"><option value="">All companies</option><option value="${esc(cur.id)}">${esc(cur.short_code)} only</option></select></label><label>Note (optional)<input name="note" maxlength="300" placeholder="e.g. HR memo no."></label></div>
-        <div class="eerr"></div><button class="btn primary" type="submit">Save row</button></form></div>`;
+        <div class="eerr"></div><button class="btn primary" type="submit">Save row</button></form></div>
+    <div class="card" id="confcard"><h3>Confidential leave (RA 9262)</h3><p class="s">Loading…</p></div>`;
+  confCard(body.querySelector("#confcard"), cur, { rpc, esc, toast, errBox });
   const f = body.querySelector("#rform");
   f.onsubmit = async (ev) => { ev.preventDefault(); f.querySelector(".eerr").innerHTML = "";
     try { await rpc("iaf_leave_rule_save", { p_company: f.co.value || null, p_code: f.c.value, p_band: f.b.value, p_min_years: Number(f.y.value || 0), p_days: Number(f.d.value), p_effective: `${st.year}-01-01`, p_note: f.note.value || null });
       toast("Saved ✔"); st.preview = null; reload(); }
     catch (e) { f.querySelector(".eerr").innerHTML = errBox(e); } };
+}
+
+// who receives confidential leave (the HR Manager decides; she can hand single cases to a supervisor from the request)
+async function confCard(box, cur, { rpc, esc, toast, errBox }) {
+  try {
+    const g = await rpc("iaf_leave_settings_get", { p_company: cur.id });
+    const staff = g.hr_staff || [];
+    box.innerHTML = `<h3>Confidential leave (RA 9262)</h3>
+      <p class="s">These requests skip the supervisor and manager and go to the HR person below. On each request, HR can hand the case to a supervisor or manager when needed.</p>
+      ${staff.length ? `<form class="form" id="cform2"><label>Goes to<select name="r"><option value="">First HR staff member (default)</option>
+        ${staff.map((x) => `<option value="${esc(x.id)}" ${g.confidential_receiver === x.id ? "selected" : ""}>${esc(x.full_name)}</option>`).join("")}</select></label>
+        <p class="s">Now going to: <b>${esc((staff.find((x) => x.id === g.effective_receiver) || {}).full_name || "nobody")}</b></p>
+        <div class="eerr"></div><button class="btn primary" type="submit">Save</button></form>`
+        : `<div class="alert warn">No HR staff account in ${esc(cur.short_code)} yet. Until one is added, employees are told to contact HR directly.</div>`}`;
+    const f = box.querySelector("#cform2");
+    if (f) f.onsubmit = async (ev) => { ev.preventDefault(); f.querySelector(".eerr").innerHTML = "";
+      try { await rpc("iaf_leave_settings_save", { p_company: cur.id, p_receiver: f.r.value || null }); toast("Saved ✔"); confCard(box, cur, { rpc, esc, toast, errBox }); }
+      catch (e) { f.querySelector(".eerr").innerHTML = errBox(e); } };
+  } catch (e) { box.innerHTML = `<h3>Confidential leave (RA 9262)</h3>` + errBox(e); }
 }

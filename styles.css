@@ -150,25 +150,25 @@ label.tick{display:inline-flex!important;flex-direction:row;align-items:center;g
 /* the 201 file is a desktop job: hidden on phones and small tablets */
 .only-mobile{display:none}
 @media(max-width:859px){.only-desktop{display:none!important}.only-mobile{display:block}}
-.schedlist .sched{padding:6px 0;border-bottom:1px solid var(--line,#e5e7eb)}
+.schedlist .sched{padding:6px 0;border-bottom:1px solid var(--line)}
 .dtab{border-collapse:collapse;margin:8px 0;font-size:.9rem}.dtab th,.dtab td{padding:3px 8px;text-align:left}.dtab input[type=number]{width:64px}
-.mysched .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line,#e5e7eb)}.mysched .today{font-weight:600}.mysched .rest{color:#6b7280}
+.mysched .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line)}.mysched .today{font-weight:600}.mysched .rest{color:#6b7280}
 @media(min-width:860px){
   .calwrap{display:grid;grid-template-columns:minmax(0,520px) minmax(260px,1fr);gap:20px;align-items:start}
   .calwrap .day{aspect-ratio:auto;height:52px;min-height:0}
   .calside{position:sticky;top:12px;max-height:calc(100vh - 100px);overflow:auto}
 }
 .emerg{background:#fee2e2;border:2px solid #dc2626;color:#7f1d1d;border-radius:12px;padding:12px 14px;margin:0 0 12px}.emerg.done{opacity:.75;border-width:1px}.emerg .btn{margin-top:8px;background:#dc2626;color:#fff;border-color:#dc2626}
-.nt{border-bottom:1px solid var(--line,#e5e7eb);padding:6px 0}.nt summary{cursor:pointer;font-weight:600}.nt-body{margin:6px 0;white-space:normal}
-.twocol{display:grid;grid-template-columns:minmax(300px,420px) 1fr;gap:16px;align-items:start}.nrow{padding:8px 0;border-bottom:1px solid var(--line,#e5e7eb)}
+.nt{border-bottom:1px solid var(--line);padding:6px 0}.nt summary{cursor:pointer;font-weight:600}.nt-body{margin:6px 0;white-space:normal}
+.twocol{display:grid;grid-template-columns:minmax(300px,420px) 1fr;gap:16px;align-items:start}.nrow{padding:8px 0;border-bottom:1px solid var(--line)}
 .egrid label[hidden]{display:none!important}
 .people{display:grid;gap:4px;max-height:220px;overflow:auto;margin:4px 0}.sreq{margin:8px 0}
 
-.day.hol{background:#fff4d6;border-color:#f0c96a}.hrow.dismissed{opacity:.55}.hrow{padding:8px 0;border-bottom:1px solid var(--line,#e5e7eb)}
+.day.hol{background:#fff4d6;border-color:#f0c96a}.hrow.dismissed{opacity:.55}.hrow{padding:8px 0;border-bottom:1px solid var(--line)}
 
 /* update 27: policies, account, leave credits */
 .pol h3{margin:0}.pol p{margin:6px 0}.dim{opacity:.6}.warnt{color:var(--warn,#9a6700);font-weight:600}
-.tscroll{overflow:auto;max-width:100%}.tscroll .dtab{min-width:100%}.tscroll .dtab tr{border-bottom:1px solid var(--line,#e5e7eb)}.tscroll .dtab th{position:sticky;top:0;background:var(--card,#fff)}
+.tscroll{overflow:auto;max-width:100%}.tscroll .dtab{min-width:100%}.tscroll .dtab tr{border-bottom:1px solid var(--line)}.tscroll .dtab th{position:sticky;top:0;background:var(--card,#fff)}
 .bal .h1{margin-top:4px;font-size:.78rem}
 @media(min-width:860px){.side nav{flex:1 1 auto;min-height:0;overflow-y:auto}.side nav a{padding:9px 12px}.side .me{flex:0 0 auto}}
 
@@ -185,3 +185,9 @@ label.tick{display:inline-flex!important;flex-direction:row;align-items:center;g
 .form details{margin:6px 0}.form details summary{cursor:pointer;font-weight:600;margin:4px 0}
 .pfilters .pbar.sm select{width:auto;flex:1 1 150px;max-width:260px}.pfilters .pbar .btn{width:auto}
 .alert:not(.bad):not(.warn):not(.ok){background:var(--waitb);color:var(--wait)}
+/* memo library: answer the AI, AI vs saved */
+.askai .aq{display:flex;flex-direction:column;gap:4px;margin:8px 0}
+.askai .aq span{font-weight:600;font-size:.92rem}
+.difft{width:100%;border-collapse:collapse;margin-top:6px}
+.difft th,.difft td{text-align:left;vertical-align:top;padding:6px;border-top:1px solid var(--line);font-size:.9rem}
+.difft td small{color:var(--mute)}
