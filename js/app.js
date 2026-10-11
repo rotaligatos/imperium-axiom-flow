@@ -56,7 +56,7 @@ async function loadMe() {
   state.canCoc = await rpc("iaf_coc_can_see").catch(() => false);   // Code of Conduct guide: supervisors and up, HR, admin
   state.irWaiting = await rpc("iaf_ir_waiting_count").catch(() => 0);
   state.late = await rpc("iaf_leave_late_summary").catch(() => ({ can_see: false }));
-  state.irAny = state.canCoc || state.irWaiting > 0 || ((await rpc("iaf_ir_list", { p_box: "all", p_employee: null, p_status: null, p_q: null }).catch(() => [])) || []).length > 0;
+  state.irAny = true;                                   // everyone can file an incident report (General or IT form)
 }
 async function loadTypes() {
   if (!state.types) state.types = await rest("leave_types?is_active=eq.true&select=id,code,display_name,tracks_balance&order=display_name");
