@@ -72,10 +72,21 @@ async function storageCall(path, init = {}) {
   if (!session) throw Object.assign(new Error("Please sign in."), { status: 401 });
   if (session.expires_at - Date.now() / 1000 < 60) await refresh();
   const res = await fetch(`${cfg.SUPABASE_URL}/storage/v1/${path}`, { ...init, headers: { apikey: cfg.SUPABASE_ANON_KEY, Authorization: `Bearer ${session.access_token}`, ...(init.headers || {}) } });
-  if (!res.ok) { let m = `Request failed (${res.status})`; try { const b = await res.json(); m = b.message || b.error || m; } catch {} throw new Error(m); }
+  if (!res.ok) { let m = `Request failed (${res.status})`; try { const b = await res.json(); m = b.message || b.error || m; } catch {} throw Object.assign(new Error(m), { status: res.status }); }
   return res;
 }
-export const storageUpload = (bucket, path, file) => storageCall(`object/${bucket}/${path}`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream", "x-upsert": "true" }, body: file });
+// Uploads retry on server hiccups (5xx, e.g. 520) or dropped connections: 3 tries, 2s then 5s apart.
+export async function storageUpload(bucket, path, file) {
+  const waits = [2000, 5000];
+  for (let i = 0; ; i++) {
+    try { return await storageCall(`object/${bucket}/${path}`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream", "x-upsert": "true" }, body: file }); }
+    catch (e) {
+      const transient = e.status >= 500 || e instanceof TypeError; // TypeError = network failure in fetch
+      if (!transient || i >= waits.length) throw e;
+      await new Promise((r) => setTimeout(r, waits[i]));
+    }
+  }
+}
 export const storageBlob = async (bucket, path) => (await storageCall(`object/authenticated/${bucket}/${path}`)).blob();
 
 // ---- Edge Functions (server-side helpers such as the AI memo reader). Runs as the signed-in user. ----

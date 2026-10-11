@@ -96,13 +96,22 @@ async function renderDetail(box, ctx, reload) {
         : d.conflict_note ? `<p class="s">HR: ${esc(d.conflict_note)}</p>` : ""}</div>` : ""}
     ${d.can_edit && (ai.app_impacts || []).length ? `<div class="card"><h3>May change how the app works</h3><p class="s">Read by the AI from this memo. Setting changes are reviewed and approved by HR (coming in the next update).</p>
       ${(ai.app_impacts || []).map((x) => `<div class="impact"><b>${esc(x.area || "")}</b>: ${esc(x.proposed || "")}${x.current ? `<br><small>Now: ${esc(x.current)}</small>` : ""}${x.effective_on ? `<br><small>From ${esc(fmtD(x.effective_on))}</small>` : ""}</div>`).join("")}</div>` : ""}
-    ${d.can_edit ? `<div class="btns only-desktop"><button class="btn" data-edit>Edit</button><button class="btn" data-up>${d.file_path ? "Replace file" : "Attach file"}</button>
+    ${d.can_edit ? `<div class="btns only-desktop"><button class="btn" data-edit>Edit</button><button class="btn" data-up>${d.file_path ? "Replace file" : "Attach file"}</button>${d.file_path ? `<button class="btn" data-aifill title="The AI reads the stored file and fills in missing details. You check before saving.">✨ Fill in from file</button>` : ""}
       ${d.status === "active" ? `<button class="btn" data-st="superseded">Mark replaced</button><button class="btn danger" data-st="retired">Retire</button>` : `<button class="btn" data-st="active">Bring back</button>`}</div>` : ""}`;
   box.querySelector("[data-back]").onclick = () => { q.sel = null; reload(); };
   box.querySelectorAll("[data-go]").forEach((a) => (a.onclick = () => { q.sel = a.dataset.go; q.status = "all"; reload(); }));
   const full = box.querySelector("[data-full]"); if (full) full.onclick = () => { const p = box.querySelector(".fulltext"); p.hidden = !p.hidden; full.textContent = p.hidden ? "Show full text" : "Hide full text"; };
   const op = box.querySelector("[data-open]"); if (op) op.onclick = async () => { op.disabled = true; try { const blob = await storageBlob(BUCKET, op.dataset.open); const url = URL.createObjectURL(blob); window.open(url, "_blank") || (location.href = url); } catch (x) { toast(x.message, true); } op.disabled = false; };
   box.querySelectorAll("[data-st]").forEach((b) => (b.onclick = async () => { if (b.dataset.st === "retired" && !confirm("Retire this memo? Employees will no longer see it.")) return; try { await rpc("iaf_policy_status", { p_id: d.id, p_status: b.dataset.st }); toast("Done ✔"); reload(); } catch (x) { toast(x.message, true); } }));
+  const af = box.querySelector("[data-aifill]"); if (af) af.onclick = async () => {
+    af.disabled = true; af.textContent = "Reading the memo… (up to a minute)";
+    try {
+      const blob = await storageBlob(BUCKET, d.file_path);
+      const coId = d.company_id || cache.opts?.companies?.[0]?.id || null;
+      const out = await fnCall("iaf-policy-ai", { file_base64: await toB64(blob), media_type: /\.pdf$/i.test(d.file_path) ? "application/pdf" : (blob.type || "image/jpeg"), file_name: d.file_name || d.file_path.split("/").pop(), company_id: coId }, 150000);
+      q.mode = "edit"; q.draft = mergeReading(d, out.reading); reload();
+    } catch (x) { toast(x.message, true); af.disabled = false; af.textContent = "✨ Fill in from file"; }
+  };
   const ed = box.querySelector("[data-edit]"); if (ed) ed.onclick = () => { q.mode = "edit"; q.draft = d; reload(); };
   const up = box.querySelector("[data-up]"); if (up) up.onclick = () => pickFile(async (f) => { await uploadFile(rpc, d.id, f); toast("File saved ✔"); reload(); }, toast);
   const cr = box.querySelector("#cres"); if (cr) cr.onclick = async () => { try { await rpc("iaf_policy_conflict_resolve", { p_id: d.id, p_note: box.querySelector("#cnote").value }); toast("Marked aligned ✔"); reload(); } catch (x) { toast(x.message, true); } };
@@ -218,13 +227,25 @@ async function renderForm(el, ctx, reload) {
       const id = await rpc("iaf_policy_save2", { p_id: q.mode === "edit" ? d.id : null, p_company: f.co.value || null, p_memo_no: v.memo_no, p_title: v.title, p_issued_on: v.issued_on, p_effective_on: v.effective_on,
         p_signatories: v.signatories, p_summary: v.summary, p_visibility: v.visibility, p_topics: topicsOut, p_supersedes: v.supersedes_id, p_full_text: v.full_text || null,
         p_ai_reading: reading, p_issued_by_dept: v.issued_by_dept_id, p_audience: v.audience, p_depts: v.audience === "departments" ? v.audience_dept_ids : [] });
-      if (file) { btn.textContent = "Uploading the file…"; try { await uploadFile(rpc, id, file); } catch (x) { toast("Saved, but the file did not upload: " + x.message, true); } }
+      let fileErr = null;
+      if (file) { btn.textContent = "Uploading the file…"; try { await uploadFile(rpc, id, file); } catch (x) { fileErr = x; } }
       cache.topics = null; q.mode = null; q.draft = null; q.sel = id; q.status = "all";
-      toast(ai && (ai.conflicts || []).length && !opts.hr ? "Published ✔ HR will review the possible conflict" : "Saved ✔"); reload();
+      if (fileErr) toast("Memo saved, but the file did not upload (" + fileErr.message + "). Press “Attach file” on the memo to try again.", true);
+      else toast(ai && (ai.conflicts || []).length && !opts.hr ? "Published ✔ HR will review the possible conflict" : "Saved ✔");
+      reload();
     } catch (x) { err.innerHTML = errBox(x); btn.disabled = false; btn.textContent = "Save memo"; }
   };
 }
 
+// AI reading over an existing memo: the AI fills empty fields; what was typed by hand stays. Topics: keep existing + add confident AI ones.
+function mergeReading(d, r) {
+  const a = fromReading(r, d.company_id), out = { ...d, _ai: r };
+  const empty = (v) => v === null || v === undefined || (typeof v === "string" && !v.trim()) || (Array.isArray(v) && !v.length);
+  for (const k of ["memo_no", "title", "issued_on", "effective_on", "signatories", "summary", "full_text", "issued_by_dept_id", "supersedes_id"]) if (empty(out[k]) && !empty(a[k])) out[k] = a[k];
+  if (empty(d.audience_dept_ids) && !empty(a.audience_dept_ids) && d.company_id) { out.audience = a.audience; out.audience_dept_ids = a.audience_dept_ids; }
+  const ids = new Set((d.topics || []).map((t) => t.id)); out.topics = [...(d.topics || []), ...a.topics.filter((t) => !ids.has(t.id))];
+  return out;
+}
 // AI reading -> form draft
 function fromReading(r, coId) {
   const co = r.applies_to?.all_companies ? null : (r.applies_to?.company_ids?.length === 1 ? r.applies_to.company_ids[0] : coId);
