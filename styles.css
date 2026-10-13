@@ -231,3 +231,6 @@ label.tick{display:inline-flex!important;flex-direction:row;align-items:center;g
 .split2{display:grid;gap:12px}@media(min-width:860px){.split2{grid-template-columns:minmax(0,1fr) minmax(0,1.3fr)}}
 
 dl.stack{display:block}dl.stack dt{font-weight:600;color:var(--ink);margin-top:8px}dl.stack dd{margin:2px 0 0;color:var(--mute)}
+.cochecks { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; margin-top: 6px; }
+.cochecks .check { margin: 0; }
+.chip.memo { cursor: pointer; }
