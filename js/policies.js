@@ -11,6 +11,9 @@ const VIS = { everyone: "Everyone", supervisors: "Supervisors and up", hr: "HR o
 const ST = { active: "In force", superseded: "Replaced", retired: "Retired" };
 const fmtD = (iso) => (iso ? new Date(String(iso).slice(0, 10) + "T00:00:00").toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" }) : "");
 let q = { search: "", topic: "", company: "", year: "", status: "active", offset: 0, sel: null, mode: null, draft: null };
+const HKIND = { regular: "Regular holiday", special_non_working: "Special non-working", special_working: "Special working day", local: "Local holiday" };
+// open one memo from another page (e.g. a holiday that came from a memo)
+export function openMemo(id) { q.sel = id; q.status = "all"; q.mode = null; q.draft = null; location.hash = "#/policies"; }
 let cache = { topics: null, opts: null };
 
 export async function renderPolicies(el, ctx) {
@@ -83,7 +86,7 @@ async function renderDetail(box, ctx, reload) {
       <div class="between"><h2 class="nm">${esc(d.title)}</h2><span class="chip ${d.status === "active" ? "ok" : "mute"}">${ST[d.status]}</span></div>
       <dl>${d.memo_no ? `<dt>Memo no.</dt><dd>${esc(d.memo_no)}</dd>` : ""}${d.issued_on ? `<dt>Issued</dt><dd>${esc(fmtD(d.issued_on))}</dd>` : ""}${d.effective_on ? `<dt>Effective</dt><dd>${esc(fmtD(d.effective_on))}</dd>` : ""}
         <dt>Issued by</dt><dd>${esc(d.issued_by)}${d.signatories ? ` — ${esc(d.signatories)}` : ""}</dd>
-        <dt>For</dt><dd>${d.audience === "departments" ? `${esc((d.audience_depts || []).join(", "))} (${esc(d.company)})` : d.company === "All companies" ? "All companies" : `Whole company (${esc(d.company)})`}${d.visibility !== "everyone" ? ` · ${esc(VIS[d.visibility])}` : ""}</dd>
+        <dt>For</dt><dd>${d.audience === "departments" ? `${esc((d.audience_depts || []).join(", "))} (${esc(d.company)})` : d.company === "All companies" ? "All companies" : (d.company_ids || []).length > 1 ? `All employees of ${esc(d.company)}` : `Whole company (${esc(d.company)})`}${d.visibility !== "everyone" ? ` · ${esc(VIS[d.visibility])}` : ""}</dd>
         <dt>Topics</dt><dd>${(d.topics || []).map((t) => `<span class="chip tchip" title="${esc(t.reason || "")}">${esc(t.name)}</span>`).join(" ")}</dd>
         ${d.supersedes ? `<dt>Replaces</dt><dd><a href="javascript:void 0" data-go="${esc(d.supersedes.id)}">${esc(d.supersedes.memo_no || "")} ${esc(d.supersedes.title)}</a></dd>` : ""}
         ${d.replaced_by ? `<dt>Replaced by</dt><dd><a href="javascript:void 0" data-go="${esc(d.replaced_by.id)}">${esc(d.replaced_by.memo_no || "")} ${esc(d.replaced_by.title)}</a></dd>` : ""}</dl>
@@ -95,8 +98,9 @@ async function renderDetail(box, ctx, reload) {
       ${(ai.conflicts || []).map((c) => `<div class="alert ${d.conflict_open ? "bad" : "warn"}"><b>${esc(c.memo_no || "")} ${esc(c.title || "")}</b><br>${esc(c.issue || "")}</div>`).join("")}
       ${d.conflict_open ? `<p class="s">HR should talk with the issuing department and record what was agreed.</p>${ctx.state && cache.opts.hr ? `<div class="form"><label>What was agreed<textarea id="cnote" rows="2" maxlength="1000" placeholder="e.g. Department will follow HRMD-26-29; memo revised"></textarea></label><button class="btn" id="cres">Mark aligned with company policy</button></div>` : ""}`
         : d.conflict_note ? `<p class="s">HR: ${esc(d.conflict_note)}</p>` : ""}</div>` : ""}
-    ${d.can_edit && (ai.app_impacts || []).length ? `<div class="card"><h3>May change how the app works</h3><p class="s">Read by the AI from this memo. Setting changes are reviewed and approved by HR (coming in the next update).</p>
+    ${d.can_edit && (ai.app_impacts || []).length ? `<div class="card"><h3>May change how the app works</h3><p class="s">Read by the AI from this memo. Holidays go to the Holidays page (box below). Other setting changes are reviewed and approved by HR (coming in a later update).</p>
       ${(ai.app_impacts || []).map((x) => `<div class="impact"><b>${esc(x.area || "")}</b>: ${esc(x.proposed || "")}${x.current ? `<br><small>Now: ${esc(x.current)}</small>` : ""}${x.effective_on ? `<br><small>From ${esc(fmtD(x.effective_on))}</small>` : ""}</div>`).join("")}</div>` : ""}
+    ${holidayCard(d, ai, esc)}
     ${d.can_edit ? `<div class="btns only-desktop"><button class="btn" data-edit>Edit</button><button class="btn" data-up>${d.file_path ? "Replace file" : "Attach file"}</button>${d.file_path ? `<button class="btn" data-aifill title="The AI reads the stored file and fills in missing details. You check before saving.">✨ Fill in from file</button>` : ""}
       ${d.status === "active" ? `<button class="btn" data-st="superseded">Mark replaced</button><button class="btn danger" data-st="retired">Retire</button>` : `<button class="btn" data-st="active">Bring back</button>`}</div>` : ""}`;
   box.querySelector("[data-back]").onclick = () => { q.sel = null; reload(); };
@@ -115,6 +119,7 @@ async function renderDetail(box, ctx, reload) {
   };
   const ed = box.querySelector("[data-edit]"); if (ed) ed.onclick = () => { q.mode = "edit"; q.draft = d; reload(); };
   const up = box.querySelector("[data-up]"); if (up) up.onclick = () => pickFile(async (f) => { await uploadFile(rpc, d.id, f); toast("File saved ✔"); reload(); }, toast);
+  wireHolidayCard(box, d, ai, ctx, reload);
   const cr = box.querySelector("#cres"); if (cr) cr.onclick = async () => { try { await rpc("iaf_policy_conflict_resolve", { p_id: d.id, p_note: box.querySelector("#cnote").value }); toast("Marked aligned ✔"); reload(); } catch (x) { toast(x.message, true); } };
 }
 
@@ -161,8 +166,10 @@ async function renderForm(el, ctx, reload) {
   }
   const d = q.draft || {};
   const ai = d._ai || null;
-  let coId = d.company_id === null ? "" : d.company_id || myCos[0]?.id || "";
+  const someIds = new Set((d.company_ids || []).map(String));
+  let coId = opts.hr && myCos.length > 1 && someIds.size > 1 ? "some" : d.company_id === null ? "" : d.company_id || myCos[0]?.id || "";
   if (!opts.hr && (!coId || !myCos.some((c) => c.id === coId))) coId = myCos[0]?.id || "";
+  const isSome = coId === "some";
   const coOpt = (id) => myCos.find((c) => c.id === id);
   const deptsOf = (cid) => (opts.departments || []).filter((x) => x.company_id === cid && (opts.hr || x.mine || coOpt(cid)?.plantwide));
   const topicSel = new Map((d.topics || []).map((t) => [t.id, t]));
@@ -171,7 +178,8 @@ async function renderForm(el, ctx, reload) {
   let index = []; try { index = await rpc("iaf_policy_index"); } catch {}
   const sup = d.supersedes_id || "";
   const canPlant = (cid) => opts.hr || !!coOpt(cid)?.plantwide;
-  const aud = d.audience || (canPlant(coId) ? "all" : "departments");
+  const holItems = opts.hr && ai ? holidayItems(ai, myCos) : [];
+  const aud = coId === "some" ? "all" : d.audience || (canPlant(coId) ? "all" : "departments");
   const file0 = d._file || null;
 
   el.innerHTML = `<div class="card only-desktop"><div class="between"><h3>${q.mode === "edit" ? "Edit memo" : ai ? "Check what the AI read" : "Add a memo"}</h3>${d._file ? `<span class="s">File: ${esc(d._file.name)}</span>` : ""}</div>
@@ -187,13 +195,14 @@ async function renderForm(el, ctx, reload) {
     <form class="form" id="mform">
       <div class="two"><label>Memo no.<input name="memo" maxlength="60" value="${esc(d.memo_no || "")}"></label><label>Title<input name="ttl" maxlength="200" required value="${esc(d.title || "")}"></label></div>
       <div class="two"><label>Date issued<input type="date" name="ion" value="${esc(d.issued_on || "")}"></label><label>Takes effect<input type="date" name="eff" value="${esc(d.effective_on || "")}"></label></div>
-      <div class="two"><label>Company<select name="co">${opts.hr ? `<option value="" ${coId === "" ? "selected" : ""}>All companies</option>` : ""}${myCos.map((c) => `<option value="${esc(c.id)}" ${coId === c.id ? "selected" : ""}>${esc(c.short_code)}</option>`).join("")}</select></label>
-        <label>Issued by<select name="iss"><option value="">HR / Management</option>${(opts.departments || []).filter((x) => (!coId || x.company_id === coId) && (opts.hr || x.mine || canPlant(x.company_id))).map((x) => `<option value="${esc(x.id)}" ${d.issued_by_dept_id === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label></div>
+      <div class="two"><label>Company<select name="co">${opts.hr ? `<option value="" ${coId === "" ? "selected" : ""}>All companies</option>` : ""}${myCos.map((c) => `<option value="${esc(c.id)}" ${coId === c.id ? "selected" : ""}>${esc(c.short_code)}</option>`).join("")}${opts.hr && myCos.length > 2 ? `<option value="some" ${isSome ? "selected" : ""}>Some companies…</option>` : ""}</select>
+          ${isSome ? `<span class="cochecks">${myCos.map((c) => `<label class="check"><input type="checkbox" name="cos" value="${esc(c.id)}" ${someIds.has(c.id) ? "checked" : ""}><span>${esc(c.short_code)}</span></label>`).join("")}</span>` : ""}</label>
+        <label>Issued by<select name="iss"><option value="">HR / Management</option>${(opts.departments || []).filter((x) => !isSome && (!coId || x.company_id === coId) && (opts.hr || x.mine || canPlant(x.company_id))).map((x) => `<option value="${esc(x.id)}" ${d.issued_by_dept_id === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label></div>
       <label>Signed / noted by<input name="sig" maxlength="300" value="${esc(d.signatories || "")}"></label>
       <fieldset class="fs"><legend>Who is the memo for?</legend>
-        <label class="check"><input type="radio" name="aud" value="all" ${aud === "all" ? "checked" : ""} ${canPlant(coId) ? "" : "disabled"}><span>${coId ? "Whole company (plant-wide)" : "All companies"}${canPlant(coId) ? "" : " <small>(HR or Head of Plant Operation only)</small>"}</span></label>
-        <label class="check"><input type="radio" name="aud" value="departments" ${aud === "departments" ? "checked" : ""} ${coId ? "" : "disabled"}><span>Only these departments:</span></label>
-        <div class="deptgrid">${coId ? deptsOf(coId).map((x) => `<label class="check"><input type="checkbox" name="dept" value="${esc(x.id)}" ${audDepts.has(x.id) ? "checked" : ""}><span>${esc(x.name)}</span></label>`).join("") || "<small>No departments you can publish for.</small>" : "<small>Choose a company first.</small>"}</div>
+        <label class="check"><input type="radio" name="aud" value="all" ${aud === "all" ? "checked" : ""} ${canPlant(coId) ? "" : "disabled"}><span>${isSome ? "All employees of the ticked companies" : coId ? "Whole company (plant-wide)" : "All companies"}${canPlant(coId) ? "" : " <small>(HR or Head of Plant Operation only)</small>"}</span></label>
+        <label class="check"><input type="radio" name="aud" value="departments" ${aud === "departments" && !isSome ? "checked" : ""} ${coId && !isSome ? "" : "disabled"}><span>Only these departments:</span></label>
+        <div class="deptgrid">${isSome ? "<small>A memo for several companies goes to all their employees.</small>" : coId ? deptsOf(coId).map((x) => `<label class="check"><input type="checkbox" name="dept" value="${esc(x.id)}" ${audDepts.has(x.id) ? "checked" : ""}><span>${esc(x.name)}</span></label>`).join("") || "<small>No departments you can publish for.</small>" : "<small>Choose a company first.</small>"}</div>
         ${ai && (ai.applies_to?.unmatched_departments || []).length ? `<small>The memo mentions: ${esc(ai.applies_to.unmatched_departments.join(", "))} — not found as departments; tick the right ones.</small>` : ""}</fieldset>
       <label>Who can read it<select name="vis">${Object.entries(VIS).filter(([k]) => k !== "hr" || opts.hr).map(([k, v]) => `<option value="${k}" ${(d.visibility || "everyone") === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
       <fieldset class="fs"><legend>Topics (tick all that apply)</legend><div class="topicgrid">
@@ -205,7 +214,9 @@ async function renderForm(el, ctx, reload) {
       <label>Summary (what employees need to know)<textarea name="sum" rows="4" maxlength="4000">${esc(d.summary || "")}</textarea></label>
       <details><summary>Full text of the memo (used for search)</summary><textarea name="full" rows="10" maxlength="60000">${esc(d.full_text || "")}</textarea></details>
       ${!d._file && q.mode !== "edit" ? `<label>Memo file (optional)<input type="file" name="file" accept="application/pdf,image/*"></label>` : ""}
-      ${ai && (ai.app_impacts || []).length ? `<div class="alert"><b>This memo may change how the app works:</b><ul class="warnlist">${ai.app_impacts.map((x) => `<li><b>${esc(x.area || "")}</b>: ${esc(x.proposed || "")}${x.current ? ` <small>(now: ${esc(x.current)})</small>` : ""}</li>`).join("")}</ul><small>Saved with the memo. Approving these as setting changes comes in the next update.</small></div>` : ""}
+      ${ai && (ai.app_impacts || []).length ? `<div class="alert"><b>This memo may change how the app works:</b><ul class="warnlist">${ai.app_impacts.map((x) => `<li><b>${esc(x.area || "")}</b>: ${esc(x.proposed || "")}${x.current ? ` <small>(now: ${esc(x.current)})</small>` : ""}</li>`).join("")}</ul><small>Saved with the memo.${holItems.length ? " Holidays are handled in the box below." : ""}</small></div>` : ""}
+      ${holItems.length ? `<fieldset class="fs"><legend>Holidays in this memo</legend><p class="s">Ticked days are sent to the Holidays page as <b>proposed</b> when you save. Confirm them there to make them count.</p>
+        ${holItems.map((h, i) => `<label class="check"><input type="checkbox" name="hol" value="${i}" ${h.action === "add" && !h.exists ? "checked" : ""} ${h.action === "add" ? "" : "disabled"}><span><b>${esc(fmtD(h.date))}</b> — ${esc(h.name)} <span class="chip">${esc(HKIND[h.kind] || h.kind)}</span> <span class="chip">${esc(h.company)}</span>${h.action === "cancel" ? " <small>The memo cancels / moves this day: remove it on the Holidays page.</small>" : ""}${h.note ? `<br><small>${esc(h.note)}</small>` : ""}</span></label>`).join("")}</fieldset>` : ""}
       <div class="eerr"></div>
       <div class="btns"><button class="btn primary" type="submit">${ai && (ai.conflicts || []).length && !opts.hr ? "Publish (HR will review)" : "Save memo"}</button><button class="btn" type="button" id="mcancel">Cancel</button></div></form></div>
     <div class="only-mobile"><p class="s">Memos are uploaded and edited on a computer.</p></div>`;
@@ -213,7 +224,7 @@ async function renderForm(el, ctx, reload) {
   const f = el.querySelector("#mform");
   el.querySelector("#mcancel").onclick = cancel;
   const keep = () => { q.draft = { ...d, ...collect(), _file: d._file || f.file?.files?.[0] || null, _ai: ai }; };
-  f.co.onchange = () => { keep(); q.draft.company_id = f.co.value === "" ? null : f.co.value; q.draft.audience_dept_ids = []; reload(); };
+  f.co.onchange = () => { keep(); const v = f.co.value; q.draft.company_id = v === "" || v === "some" ? null : v; q.draft.company_ids = v === "some" ? (q.draft.company_ids?.length > 1 ? q.draft.company_ids : myCos.map((c) => c.id)) : []; q.draft.audience_dept_ids = []; if (v === "some") q.draft.audience = "all"; reload(); };
   const FIELD = { memo_no: "memo", title: "ttl", issued_on: "ion", effective_on: "eff", signatories: "sig", summary: "sum" };
   el.querySelectorAll("[data-useai]").forEach((b) => (b.onclick = () => { const x = d._diffs[Number(b.dataset.useai)]; f.elements[FIELD[x.k]].value = x.ai; b.closest("tr").remove(); }));
   const ask = el.querySelector("#askagain"); if (ask) ask.onclick = async () => {
@@ -237,7 +248,8 @@ async function renderForm(el, ctx, reload) {
     const tIds = [...f.querySelectorAll("input[name=topic]:checked")].map((i) => i.value);
     return { memo_no: f.memo.value, title: f.elements.ttl.value, issued_on: f.elements.ion.value || null, effective_on: f.eff.value || null, issued_by_dept_id: f.iss.value || null,
       signatories: f.sig.value, audience: (f.querySelector("input[name=aud]:checked") || {}).value || "all", audience_dept_ids: [...f.querySelectorAll("input[name=dept]:checked")].map((i) => i.value),
-      visibility: f.vis.value, topics: tIds.map((id) => ({ id })), supersedes_id: f.sup.value || null, summary: f.sum.value, full_text: f.full.value };
+      visibility: f.vis.value, topics: tIds.map((id) => ({ id })), supersedes_id: f.sup.value || null, summary: f.sum.value, full_text: f.full.value,
+      company_ids: f.co.value === "some" ? [...f.querySelectorAll("input[name=cos]:checked")].map((i) => i.value) : [] };
   }
   f.onsubmit = async (ev) => {
     ev.preventDefault(); const err = f.querySelector(".eerr"); err.innerHTML = ""; const btn = f.querySelector("button[type=submit]");
@@ -245,18 +257,28 @@ async function renderForm(el, ctx, reload) {
     if (!v.topics.length) { err.innerHTML = errBox(new Error("Tick at least one topic.")); return; }
     if (v.audience === "departments" && !v.audience_dept_ids.length) { err.innerHTML = errBox(new Error("Tick the department(s) the memo is for.")); return; }
     if (file && file.size > 15 * 1024 * 1024) { err.innerHTML = errBox(new Error("File is too big (15 MB max).")); return; }
+    const some = f.co.value === "some";
+    if (some && v.company_ids.length < 2) { err.innerHTML = errBox(new Error("Tick at least 2 companies (or choose one company).")); return; }
     btn.disabled = true; btn.textContent = "Saving…";
     const topicsOut = v.topics.map((t) => { const a = aiTopic.get(t.id); return { id: t.id, source: a ? "ai" : "hr", reason: a?.reason || null }; });
     const reading = ai ? { ...ai, full_text: undefined } : null;
     try {
-      const id = await rpc("iaf_policy_save2", { p_id: q.mode === "edit" ? d.id : null, p_company: f.co.value || null, p_memo_no: v.memo_no, p_title: v.title, p_issued_on: v.issued_on, p_effective_on: v.effective_on,
+      const id = await rpc("iaf_policy_save2", { p_id: q.mode === "edit" ? d.id : null, p_company: some ? null : f.co.value || null, p_memo_no: v.memo_no, p_title: v.title, p_issued_on: v.issued_on, p_effective_on: v.effective_on,
         p_signatories: v.signatories, p_summary: v.summary, p_visibility: v.visibility, p_topics: topicsOut, p_supersedes: v.supersedes_id, p_full_text: v.full_text || null,
         p_ai_reading: reading, p_issued_by_dept: v.issued_by_dept_id, p_audience: v.audience, p_depts: v.audience === "departments" ? v.audience_dept_ids : [] });
+      if (opts.hr && (some || (d.company_ids || []).length)) await rpc("iaf_policy_companies_set", { p_id: id, p_companies: some ? v.company_ids : (f.co.value ? [f.co.value] : []) });
+      let holMsg = "";
+      const holPick = [...f.querySelectorAll("input[name=hol]:checked")].map((i) => holItems[Number(i.value)]);
+      if (holPick.length) {
+        try { const r = await rpc("iaf_holiday_from_memo", { p_memo: id, p_items: holPick.map((h) => ({ date: h.date, name: h.name, kind: h.kind, company_id: h.company_id, note: h.note })) });
+          holMsg = r.added ? ` ${r.added} holiday day(s) sent to the Holidays page — confirm them there.` : " The holidays were already on the Holidays page."; }
+        catch (x) { holMsg = " Holidays were not added (" + x.message + ")."; }
+      }
       let fileErr = null;
       if (file) { btn.textContent = "Uploading the file…"; try { await uploadFile(rpc, id, file); } catch (x) { fileErr = x; } }
       cache.topics = null; q.mode = null; q.draft = null; q.sel = id; q.status = "all";
       if (fileErr) toast("Memo saved, but the file did not upload (" + fileErr.message + "). Press “Attach file” on the memo to try again.", true);
-      else toast(ai && (ai.conflicts || []).length && !opts.hr ? "Published ✔ HR will review the possible conflict" : "Saved ✔");
+      else toast((ai && (ai.conflicts || []).length && !opts.hr ? "Published ✔ HR will review the possible conflict" : "Saved ✔") + holMsg);
       reload();
     } catch (x) { err.innerHTML = errBox(x); btn.disabled = false; btn.textContent = "Save memo"; }
   };
@@ -273,14 +295,82 @@ function mergeReading(d, r) {
     else if (LBL[k] && !empty(a[k]) && String(out[k]).trim().toLowerCase() !== String(a[k]).trim().toLowerCase()) out._diffs.push({ k, label: LBL[k], saved: String(out[k]), ai: String(a[k]) });
   }
   if (empty(d.audience_dept_ids) && !empty(a.audience_dept_ids) && d.company_id) { out.audience = a.audience; out.audience_dept_ids = a.audience_dept_ids; }
+  if (!(d.company_ids || []).length && (a.company_ids || []).length > 1 && !d.id) { out.company_ids = a.company_ids; out.company_id = null; }
   const ids = new Set((d.topics || []).map((t) => t.id)); out.topics = [...(d.topics || []), ...a.topics.filter((t) => !ids.has(t.id))];
   return out;
 }
 // AI reading -> form draft
 function fromReading(r, coId) {
-  const co = r.applies_to?.all_companies ? null : (r.applies_to?.company_ids?.length === 1 ? r.applies_to.company_ids[0] : coId);
-  return { memo_no: r.memo_no, title: r.title, issued_on: r.issued_on, effective_on: r.effective_on, signatories: r.signatories, summary: r.summary, full_text: r.full_text,
+  const ids = r.applies_to?.company_ids || [];
+  const co = r.applies_to?.all_companies ? null : (ids.length === 1 ? ids[0] : ids.length > 1 ? null : coId);
+  return { company_ids: !r.applies_to?.all_companies && ids.length > 1 ? ids : [], memo_no: r.memo_no, title: r.title, issued_on: r.issued_on, effective_on: r.effective_on, signatories: r.signatories, summary: r.summary, full_text: r.full_text,
     company_id: co, issued_by_dept_id: r.issuer?.is_hr ? null : r.issuer?.dept_id || null, audience: r.applies_to?.audience || "all",
     audience_dept_ids: (r.applies_to?.departments || []).map((x) => x.id), visibility: r.visibility || "everyone",
     topics: (r.topics || []).filter((t) => t.confident).map((t) => ({ id: t.id })), supersedes_id: r.supersedes?.id || null, _ai: r };
+}
+
+// AI holidays -> one line per day and company (only companies HR handles)
+function holidayItems(ai, myCos, existing = []) {
+  const out = [];
+  for (const h of ai.holidays || []) for (const cid of h.company_ids || []) {
+    const c = myCos.find((x) => x.id === cid); if (!c) continue;
+    out.push({ ...h, company_id: cid, company: c.short_code, exists: existing.some((e) => e.company_id === cid && e.date === h.date) });
+  }
+  return out.sort((a, b) => (a.date + a.company).localeCompare(b.date + b.company));
+}
+
+// ---------- holidays declared by a memo (HR) ----------
+function memoHolidayTalk(ai) {
+  return (ai.holidays || []).length || (ai.app_impacts || []).some((x) => /holiday|non-working/i.test(`${x.area} ${x.proposed}`));
+}
+function holidayCard(d, ai, esc) {
+  const hr = !!cache.opts?.hr, have = d.holidays || [];
+  if (!hr && !have.length) return "";
+  const myCos = (cache.opts?.companies || []);
+  const pending = hr ? holidayItems(ai, myCos, have).filter((h) => h.action === "add" && !h.exists) : [];
+  const talk = memoHolidayTalk(ai) || have.length;
+  const coTicks = myCos.map((c) => `<label class="check"><input type="checkbox" name="hco" value="${esc(c.id)}" ${(d.company_ids || []).includes(c.id) || d.company_id === c.id || (!d.company_id && !(d.company_ids || []).length) ? "checked" : ""}><span>${esc(c.short_code)}</span></label>`).join("");
+  const form = `<form class="form" id="hmform"><div class="two"><label>From<input type="date" name="from" required value="${esc(d.effective_on || "")}"></label><label>To (same day if one day)<input type="date" name="to"></label></div>
+        <div class="two"><label>Name<input name="name" maxlength="120" required placeholder="e.g. ASEAN Summit (NCR)"></label><label>Type<select name="kind">${Object.entries(HKIND).map(([k, v]) => `<option value="${k}" ${k === "special_non_working" ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>
+        <div class="cochecks"><span class="s">For:</span> ${coTicks}</div><div class="eerr"></div>
+        <button class="btn" type="submit">Send to the Holidays page</button></form>`;
+  const manual = hr ? `<details ${talk && !pending.length && !have.length ? "open" : ""}><summary>${have.length || pending.length ? "Add other days by hand" : "Add the holiday days of this memo"}</summary>${form}</details>` : "";
+  if (!talk && hr) return `<div class="card only-desktop"><details><summary>Does this memo declare a holiday?</summary>${form}</details></div>`;
+  return `<div class="card" id="memohol"><h3>🎌 Holidays from this memo</h3>
+    ${have.length ? `<div class="hlist">${have.map((h) => `<div class="row"><span><b>${esc(fmtD(h.date))}</b> — ${esc(h.name)} <span class="chip">${esc(HKIND[h.kind] || h.kind)}</span> <span class="chip">${esc(h.company)}</span></span><span class="chip ${h.status === "active" ? "ok" : h.status === "proposed" ? "warn" : "mute"}">${h.status === "active" ? "On the calendar" : h.status === "proposed" ? "Waiting for HR to confirm" : "Dismissed"}</span></div>`).join("")}</div>
+      ${hr && have.some((h) => h.status === "proposed") ? `<p class="s">Confirm them on the <a href="#/holidays">Holidays page</a> so they count (leave days, schedules).</p>` : ""}` : hr ? `<p class="s">Not on the Holidays page yet.</p>` : ""}
+    ${pending.length ? `<div class="only-desktop"><p class="s">The AI found these days in the memo. Tick the ones to send to the Holidays page (as proposed):</p>
+      ${pending.map((h, i) => `<label class="check"><input type="checkbox" name="hp" value="${i}" checked><span><b>${esc(fmtD(h.date))}</b> — ${esc(h.name)} <span class="chip">${esc(HKIND[h.kind] || h.kind)}</span> <span class="chip">${esc(h.company)}</span></span></label>`).join("")}
+      <div class="btns"><button class="btn primary" id="hpadd">Send to the Holidays page</button></div></div>` : ""}
+    ${(ai.holidays || []).some((h) => h.action === "cancel") ? `<div class="alert warn">The memo cancels or moves: ${(ai.holidays || []).filter((h) => h.action === "cancel").map((h) => `${esc(fmtD(h.date))} ${esc(h.name)}`).join(", ")}. Remove or dismiss it on the <a href="#/holidays">Holidays page</a>.</div>` : ""}
+    <div class="only-desktop">${manual}</div></div>`;
+}
+function wireHolidayCard(box, d, ai, ctx, reload) {
+  const { rpc, toast } = ctx;
+  const card = box.querySelector("#memohol") || box; const myCos = cache.opts?.companies || [];
+  const send = async (items, btn) => {
+    if (!items.length) { toast("Tick at least one day.", true); return; }
+    if (btn) btn.disabled = true;
+    try {
+      const r = await rpc("iaf_holiday_from_memo", { p_memo: d.id, p_items: items });
+      toast(r.added ? `${r.added} day(s) sent ✔ Confirm them on the Holidays page.${r.skipped ? ` ${r.skipped} already had a holiday.` : ""}` : "Already on the Holidays page — nothing new.", !r.added);
+      reload();
+    } catch (x) { toast(x.message, true); if (btn) btn.disabled = false; }
+  };
+  const add = card.querySelector("#hpadd");
+  if (add) add.onclick = () => {
+    const pending = holidayItems(ai, myCos, d.holidays || []).filter((h) => h.action === "add" && !h.exists);
+    const pick = [...card.querySelectorAll("input[name=hp]:checked")].map((i) => pending[Number(i.value)]);
+    send(pick.map((h) => ({ date: h.date, name: h.name, kind: h.kind, company_id: h.company_id, note: h.note })), add);
+  };
+  const mf = box.querySelector("#hmform");
+  if (mf) mf.onsubmit = (ev) => {
+    ev.preventDefault(); const err = mf.querySelector(".eerr"); err.innerHTML = "";
+    const from = mf.from.value, to = mf.to.value || from, cos = [...mf.querySelectorAll("input[name=hco]:checked")].map((i) => i.value);
+    if (!from || to < from) { err.innerHTML = ctx.errBox(new Error("Check the dates: To must be on or after From.")); return; }
+    if (!cos.length) { err.innerHTML = ctx.errBox(new Error("Tick at least one company.")); return; }
+    const days = []; for (let t = new Date(from + "T00:00:00"); ; t.setDate(t.getDate() + 1)) { const k = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; if (k > to) break; days.push(k); if (days.length > 31) break; }
+    if (days.length > 31) { err.innerHTML = ctx.errBox(new Error("31 days at most at a time.")); return; }
+    send(days.flatMap((day) => cos.map((c) => ({ date: day, name: mf.name.value, kind: mf.kind.value, company_id: c }))), mf.querySelector("button[type=submit]"));
+  };
 }
