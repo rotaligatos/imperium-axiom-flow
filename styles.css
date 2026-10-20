@@ -234,3 +234,8 @@ dl.stack{display:block}dl.stack dt{font-weight:600;color:var(--ink);margin-top:8
 .cochecks { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; margin-top: 6px; }
 .cochecks .check { margin: 0; }
 .chip.memo { cursor: pointer; }
+/* update 42: For HR review + leave credit details */
+.rvbar{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin:8px 0}.rvbar label{min-width:160px;flex:1}
+.rvadd{margin-top:10px}.rvadd summary{cursor:pointer;font-weight:700;padding:6px 0}
+.rv .rvd{margin:8px 0;white-space:pre-wrap}.rv textarea{width:100%}.rv .rvh{margin-top:8px}
+.detrow td{background:var(--soft,#f6f8fb)}.detbox{padding:8px 4px}.detbox .form{gap:8px}.detbox small{color:var(--mute)}

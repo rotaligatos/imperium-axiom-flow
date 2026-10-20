@@ -7,7 +7,7 @@ export const NAV_GROUPS = [
   { title: "Workplace", items: [["#/calendar", "Who's out", "📅", "calendar", () => true], ["#/ir", "Incident reports", "📝", "ir", () => true],
     ["#/coc", "Code of Conduct", "⚖️", "coc", (f) => f.coc], ["#/policies", "Policies & Memos", "📚", "policies", () => true]] },
   { title: "HR", items: [["#/employees", "Employees & 201", "👥", "employees", (f) => f.people], ["#/org", "Org chart", "🗂️", "org", (f) => f.people],
-    ["#/schedules", "Schedules", "🕒", "schedules", (f) => f.people], ["#/credits", "Leave credits", "🧮", "credits", (f) => f.people],
+    ["#/schedules", "Schedules", "🕒", "schedules", (f) => f.people], ["#/credits", "Leave credits", "🧮", "credits", (f) => f.people], ["#/review", "For HR review", "🔎", "review", (f) => f.people],
     ["#/holidays", "Holidays", "🎌", "holidays", (f) => f.people], ["#/notices", "Notices", "📢", "notices", (f) => f.people]] },
   { title: "Admin", items: [["#/admin", "People & access", "⚙️", "admin", (f) => f.admin], ["#/roles", "View by role", "🔍", "roles", (f) => f.admin]] },
 ];
@@ -31,6 +31,8 @@ export const FEATURES = [
     hr: "Own + anyone (recorded at once)", hrm: "Own + anyone (recorded at once)", admin: "Own + anyone (recorded at once)" }],
   ["Approve leave and OB", { ...ALL("—"), supervisor: "Their team (first step)", manager: "Their department", head: "If on the route; final approver of shift changes",
     hr: "Cases handed to them (confidential leave)", hrm: "VL covering SL, confidential leave", admin: "If on the route" }],
+  ["For HR review (employee record items)", { ...ALL("—"), hr: "Whole company: resolve, dismiss, add", hrm: "Whole company: resolve, dismiss, add", admin: "Whole company: resolve, dismiss, add" }],
+  ["Medical certificate (Sick Leave over 2 days)", { ...ALL("Own: reminded until HR receives it"), supervisor: "Alerted for people under them; mark received or waive", manager: "Alerted for people under them; mark received or waive", head: "Alerted for people under them; mark received or waive", hr: "Whole company: mark received or waive", hrm: "Whole company: mark received or waive", admin: "Whole company: mark received or waive" }],
   ["Late leave filings list", { ...ALL("—"), supervisor: "People under them", manager: "People under them", head: "People under them", hr: "Whole company", hrm: "Whole company", admin: "Whole company" }],
   ["Who's out calendar", ALL("Yes")],
   ["Incident reports", { ...ALL("File; see own reports; reports about them after a Notice to Explain"), supervisor: "File; note reports on the route; recommend lighter penalty (Manager level)",
