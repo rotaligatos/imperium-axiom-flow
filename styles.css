@@ -248,3 +248,6 @@ dl.stack{display:block}dl.stack dt{font-weight:600;color:var(--ink);margin-top:8
 label.navrow{flex-direction:row;align-items:center;font-weight:400;margin:0;text-align:left}
 .navrow>span{font-weight:500}
 label.navrow{min-width:0}
+/* update 44: logins */
+.lgtab input[data-name]{min-width:190px;font-family:ui-monospace,monospace}.lgtab td{vertical-align:middle}
+code.pw{font-size:1.05rem;letter-spacing:.5px;background:#fff3cd;padding:2px 6px;border-radius:6px}

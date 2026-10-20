@@ -1,4 +1,6 @@
 import { keepPlace } from "./keep.js";
+import { fnCall } from "./api.js";
+import { suggestUsername } from "./logins.js";
 // Org chart (administrator / HR staff): one department at a time, drag a person onto their manager.
 // Drag works with mouse and touch (pointer events). Every box can also be edited without dragging (select a person → "Reports to").
 const RANKS = { 1: "Rank and File", 2: "Staff", 3: "Supervisor", 4: "Manager", 5: "Head / HR Manager", 6: "Director", 7: "Managing Director" };
@@ -78,7 +80,7 @@ export async function renderOrg(el, { rpc, esc, toast, errBox, state }) {
       <div class="btns"><button class="btn" data-photo>${photo[sel.emp] ? "Change photo" : "Add photo"}</button><input type="file" id="ofile" accept="image/*" hidden>
       </div>
       ${sel.extra ? `<p class="s">This is an additional position. Leave requests follow the person's <b>main</b> position and company, not this box.</p>` : sel.has_login ? `<p class="s"><span class="chip ok">has login</span> Leave requests from this person go to the nearest person above them who also has a login.</p>`
-        : state.isAdmin ? `<div id="olink"><p class="s">No login yet. To let this person file leave, create their login in Supabase (Authentication → Users → Add user), then link it here.</p><div class="empty small">Loading logins…</div></div>` : `<p class="s">No login yet. The administrator can link one.</p>`}
+        : state.isAdmin ? `<div id="olink"><p class="s">No login yet.</p><div class="empty small">Loading…</div></div>` : `<p class="s">No login yet. The administrator can link one.</p>`}
       <div id="oerr"></div></div>` : ""}`;
 
   const reload = () => keepPlace(el, () => renderOrg(el, { rpc, esc, toast, errBox, state }));
@@ -108,13 +110,22 @@ export async function renderOrg(el, { rpc, esc, toast, errBox, state }) {
     rpc("iaf_link_candidates", { p_company: cur.id }).then((cands) => {
       const box = el.querySelector("#olink"); if (!box) return;
       const missing = !sel.role_id || !sel.dept_id;
-      box.innerHTML = `<p class="s">No login yet. To let this person file leave, create their login in Supabase (Authentication → Users → Add user), then link it here.${missing ? ` <b>Set their department and job title first (Employees tab).</b>` : ""}</p>
+      box.innerHTML = `<p class="s">No login yet. Create one so this person can file leave, OB and shift changes. Type their email, or keep the username if they have no email.${missing ? ` <b>Set their department and job title first (Employees tab).</b>` : ""}</p>
+        <form class="form" id="onewf"><label>Email or username<input name="l" required maxlength="120" autocomplete="off" spellcheck="false" value="${esc(suggestUsername({ name: sel.full_name }, new Set()))}"></label>
+          <button class="btn primary" type="submit"${missing ? " disabled" : ""}>Create login</button></form><div id="onewres"></div>
+        <details><summary class="s">Or link a login already made in Supabase</summary>
         <form class="form" id="olinkf"><label>Login<select name="u" required><option value="">${cands.length ? "— choose —" : "— no unlinked logins —"}</option>
           ${cands.map((c) => `<option value="${esc(c.id)}">${c.kind === "login" ? "New login: " : "Existing user: "}${esc(c.label)}</option>`).join("")}</select></label>
-          <div class="two"><label>VL days this year <span class="opt">(optional)</span><input name="vl" type="number" min="0" step="0.5"></label><label>SL days this year <span class="opt">(optional)</span><input name="sl" type="number" min="0" step="0.5"></label></div>
-          <button class="btn primary" type="submit"${missing ? " disabled" : ""}>Give login access</button></form>`;
+          <button class="btn" type="submit"${missing ? " disabled" : ""}>Link login</button></form></details>`;
+      box.querySelector("#onewf").onsubmit = async (ev) => { ev.preventDefault(); const f = ev.target, b = f.querySelector("button"); b.disabled = true; b.textContent = "Creating…";
+        try { const out = await fnCall("iaf-admin-login", { action: "create", items: [{ employee_id: sel.emp, login: f.l.value }] }); const r = (out.results || [])[0] || {};
+          if (!r.ok) throw new Error(r.error || "Could not create the login.");
+          box.innerHTML = `<div class="alert ok"><b>Login created for ${esc(sel.full_name)}</b><br>Sign in with: <code>${esc(r.username || r.login)}</code><br>First-time password: <code class="pw">${esc(r.password)}</code>
+            <br><small>Shown only now — write it down or hand it over. They choose their own password when they first sign in. Lost it? Admin → Logins → Reset password.</small></div><button class="btn" id="odone">Done</button>`;
+          box.querySelector("#odone").onclick = () => reload(); toast("Login created ✔");
+        } catch (e) { el.querySelector("#oerr").innerHTML = errBox(e); b.disabled = false; b.textContent = "Create login"; } };
       box.querySelector("#olinkf").onsubmit = async (ev) => { ev.preventDefault(); const f = ev.target; f.querySelector("button").disabled = true;
-        try { await rpc("iaf_employee_link_login", { p_employee_id: sel.emp, p_user_id: f.u.value, p_vl_days: f.vl.value === "" ? null : Number(f.vl.value), p_sl_days: f.sl.value === "" ? null : Number(f.sl.value) });
+        try { await rpc("iaf_employee_link_login", { p_employee_id: sel.emp, p_user_id: f.u.value, p_vl_days: null, p_sl_days: null });
           toast("Login linked ✔"); await reload(); } catch (e) { el.querySelector("#oerr").innerHTML = errBox(e); f.querySelector("button").disabled = false; } };
     }).catch((e) => { const b = el.querySelector("#olink"); if (b) b.innerHTML = errBox(e); });
   }

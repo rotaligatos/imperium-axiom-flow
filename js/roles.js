@@ -11,14 +11,14 @@ export const NAV_GROUPS = [
   { title: "HR", items: [["#/employees", "Employees & 201", "👥", "employees", (f) => f.people], ["#/org", "Org chart", "🗂️", "org", (f) => f.people],
     ["#/schedules", "Schedules", "🕒", "schedules", (f) => f.people], ["#/credits", "Leave credits", "🧮", "credits", (f) => f.people], ["#/review", "For HR review", "🔎", "review", (f) => f.people],
     ["#/holidays", "Holidays", "🎌", "holidays", (f) => f.people], ["#/notices", "Notices", "📢", "notices", (f) => f.people]] },
-  { title: "Admin", items: [["#/admin", "People & access", "⚙️", "admin", (f) => f.admin], ["#/roles", "View by role", "🔍", "roles", (f) => f.admin]] },
+  { title: "Admin", items: [["#/admin", "People & access", "⚙️", "admin", (f) => f.admin], ["#/logins", "Logins", "🔑", "logins", (f) => f.admin], ["#/roles", "View by role", "🔍", "roles", (f) => f.admin]] },
 ];
 // items open to everyone (the administrator may give them to anyone); the others need access given elsewhere
 export const OPEN_ITEMS = ["file", "requests", "ob", "shift", "time", "calendar", "ir", "policies"];
 const NEEDS = { approvals: "people who approve leave (org chart)", late: "supervisors, managers and HR", coc: "supervisors and up, HR",
   employees: "HR staff access (People & access)", org: "HR staff access (People & access)", schedules: "HR staff access (People & access)", credits: "HR staff access (People & access)",
-  review: "HR staff access (People & access)", holidays: "HR staff access (People & access)", notices: "HR staff access (People & access)", admin: "administrators", roles: "administrators" };
-const LOCKED = (role, key) => role === "admin" && (key === "admin" || key === "roles");
+  review: "HR staff access (People & access)", holidays: "HR staff access (People & access)", notices: "HR staff access (People & access)", admin: "administrators", logins: "administrators", roles: "administrators" };
+const LOCKED = (role, key) => role === "admin" && (key === "admin" || key === "roles" || key === "logins");
 // built-in default (same as the server iaf_nav_default)
 export const navDefault = (role, key) => (key === "calendar" ? !["staff", "it"].includes(role) : true);
 const findItem = (key) => NAV_GROUPS.flatMap((g) => g.items).find((it) => it[3] === key);
@@ -60,7 +60,7 @@ export const FEATURES = [
   ["Policies & memos", { ...ALL("Read memos for everyone"), supervisor: "Also memos for supervisors and up", manager: "Also publish for own department", head: "Also publish plant-wide",
     hr: "Publish all, incl. HR-only", hrm: "Publish all, incl. HR-only", admin: "Publish all" }],
   ["Employees, 201, org chart, schedules, leave credits, holidays, notices", { ...ALL("—"), hr: "Yes (computer)", hrm: "Yes (computer); chooses who gets confidential leave", admin: "Yes (computer)" }],
-  ["Admin: logins, HR access, view by role", { ...ALL("—"), admin: "Yes" }],
+  ["Admin: make logins (one or many), reset passwords, HR access, view by role", { ...ALL("—"), admin: "Yes" }],
 ];
 
 let cfg = null;
