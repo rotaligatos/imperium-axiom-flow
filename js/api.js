@@ -35,9 +35,20 @@ async function authCall(grant, payload) {
   return toSession(await parse(res));
 }
 
+// Employees without an email sign in with a username (e.g. juan.delacruz), stored as username@LOGIN_DOMAIN (see js/logins.js).
+const LOGIN_DOMAIN = "login.worldclasslaminate.com.ph";
+export const loginEmail = (id) => { const s = String(id || "").trim().toLowerCase(); return s.includes("@") ? s : `${s}@${LOGIN_DOMAIN}`; };
 export async function signIn(email, password) {
-  try { save(await authCall("password", { email, password })); }
-  catch (e) { if (e.status === 400) e.message = "Wrong email or password."; throw e; }
+  try { save(await authCall("password", { email: loginEmail(email), password })); }
+  catch (e) { if (e.status === 400) e.message = "Wrong username / email or password."; throw e; }
+}
+// the signed-in person sets a new password
+export async function changePassword(password) {
+  if (!session) throw new Error("Please sign in.");
+  if (session.expires_at - Date.now() / 1000 < 60) await refresh();
+  const res = await fetch(`${cfg.SUPABASE_URL}/auth/v1/user`, { method: "PUT",
+    headers: { apikey: cfg.SUPABASE_ANON_KEY, Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+  try { await parse(res); } catch (e) { if (/same|different/i.test(e.message)) e.message = "Choose a password different from the first-time one."; else if (/weak|short|characters/i.test(e.message)) e.message = "That password is too weak: use at least 8 characters with letters and numbers."; throw e; }
 }
 
 export async function signOut() {

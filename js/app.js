@@ -16,7 +16,8 @@ import { renderCoc } from "./coc.js";
 import { renderIr } from "./ir.js";
 import { mountPad, pngToPdfImage } from "./sigpad.js";
 import { sign, registerDevice, myDevices, canSign } from "./sign.js";
-import { isConfigured, getSession, userId, signIn, signOut, rest, rpc } from "./api.js";
+import { isConfigured, getSession, userId, signIn, signOut, rest, rpc, fnCall, changePassword } from "./api.js";
+import { renderLogins } from "./logins.js";
 
 const $app = document.getElementById("app");
 const $toast = document.getElementById("toast");
@@ -51,7 +52,7 @@ let navToken = 0;
 
 // ---------- data ----------
 async function loadMe() {
-  const rows = await rest(`users?id=eq.${userId()}&select=id,full_name,company_id,dept_id,manager_id,status`);
+  const rows = await rest(`users?id=eq.${userId()}&select=id,full_name,company_id,dept_id,manager_id,status,must_change_password`);
   if (!rows.length) throw new Error("Your login is not linked to an employee record yet. Please contact HR.");
   state.me = rows[0];
   state.isAdmin = (await rest("iaf_admins?select=user_id").catch(() => [])).length > 0;
@@ -121,7 +122,7 @@ async function viewLogin() {
   }
   $app.innerHTML = `<div class="auth"><form class="card" id="login" autocomplete="on">
     <img class="logo big" src="icons/icon-192.png" alt="IAF"><h1>Imperium Axiom Flow</h1><p class="sub">Sign in with your company account</p>
-    <label>Email<input name="email" type="email" inputmode="email" autocomplete="username" autocapitalize="none" required></label>
+    <label>Email or username<input name="email" type="text" inputmode="email" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required></label>
     <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
     <div id="lerr"></div><button class="btn primary block" type="submit">Sign in</button></form></div>`;
   document.getElementById("login").addEventListener("submit", async (ev) => {
@@ -527,7 +528,7 @@ async function viewAccount(tok) {
   try {
     const [devs, myImg] = await Promise.all([myDevices().catch(() => []), rest(`iaf_signature_images?user_id=eq.${userId()}&select=png_base64`).catch(() => [])]);
     if (tok !== navToken) return;
-    el.innerHTML = `<div class="card"><h3>${esc(state.me?.full_name || "")}</h3><p class="s">${esc(getSession()?.user?.email || "")}</p></div>
+    el.innerHTML = `<div class="card"><h3>${esc(state.me?.full_name || "")}</h3><p class="s">Signed in as ${esc((getSession()?.user?.email || "").replace(/@login\.worldclasslaminate\.com\.ph$/, ""))}</p></div>
       <div class="card"><h3>My signature</h3>
         <p class="s">${devs.length ? `✔ Device set up (${esc(devs.map((d) => d.label || "Device").join(", "))}). You sign with your fingerprint, face or device PIN.`
           : "Step 1 — set up this device so your fingerprint, face or PIN can be your signature."}</p>
@@ -535,7 +536,9 @@ async function viewAccount(tok) {
         <p class="s" style="margin-top:14px">${myImg[0] ? "✔ Your drawn signature (shown on the printed form):" : "Step 2 — draw your signature. It appears on your leave forms once you file or approve."}</p>
         ${myImg[0] ? `<div class="sigprev"><img alt="Your signature" src="data:image/png;base64,${esc(myImg[0].png_base64)}"></div>` : ""}
         <div id="padhost"></div>
-        <button class="btn block" data-act="draw-sig">${myImg[0] ? "Change signature" : "Draw my signature"}</button></div>`;
+        <button class="btn block" data-act="draw-sig">${myImg[0] ? "Change signature" : "Draw my signature"}</button></div>
+      <details class="card"><summary><b>Change my password</b></summary>${pwForm("chpw", "Change password")}</details>`;
+    wirePwForm(el.querySelector("#chpw"), async () => { toast("Password changed ✔"); route(); });
     el.querySelectorAll("[data-act=reg-device]").forEach((rb) => (rb.onclick = async (ev) => { const b = ev.currentTarget; b.disabled = true;
       try { await registerDevice(state.me?.full_name); toast("This device is set up ✔"); route();
       } catch (e) { toast(e.message || "Could not set up this device", true); b.disabled = false; } }));
@@ -616,6 +619,12 @@ async function viewCreditsPage(tok) {
   const el = document.querySelector(".content"); if (tok !== navToken) return;
   await renderCredits(el, { rpc, esc, toast, errBox, state });
 }
+async function viewLoginsPage(tok) {
+  if (!state.isAdmin) { location.replace("#/"); return; }
+  shell("logins", "Logins", loading(), true);
+  const el = document.querySelector(".content"); if (tok !== navToken) return;
+  await renderLogins(el, { rpc, fnCall, esc, toast, errBox, state });
+}
 async function viewReviewPage(tok) {
   if (!state.canPeople) { location.replace("#/"); return; }
   shell("review", "For HR review", loading(), true);
@@ -636,6 +645,7 @@ async function viewOrgPage(tok) {
 }
 async function route() {
   if (!getSession()) return viewLogin();
+  if (state.me?.must_change_password) return viewSetPassword();
   const tok = ++navToken; const h = location.hash.replace(/^#/, "") || "/";
   const [, p, arg] = h.split("?")[0].split("/");
   if (OPEN_ITEMS.includes(p) && state.me && !can(p)) { location.replace("#/"); return; }
@@ -660,6 +670,7 @@ async function route() {
   if (p === "ob") return viewObPage(tok);
   if (p === "credits") return viewCreditsPage(tok);
   if (p === "review") return viewReviewPage(tok);
+  if (p === "logins") return viewLoginsPage(tok);
   return viewHome(tok);
 }
 document.addEventListener("click", async (ev) => { $toast.className = "";
@@ -677,7 +688,29 @@ async function bootSignedIn() {
   try { await loadMe(); } catch (e) {
     if (e.status === 401) { await signOut(); return viewLogin(); }
     $app.innerHTML = `<div class="auth"><div class="card"><h1>Can't open your account</h1>${errBox(e)}<button class="btn block" data-act="signout">Sign out</button></div></div>`; return; }
+  if (state.me?.must_change_password) return viewSetPassword();
   await refreshBadge(); route();
+}
+// first sign-in (or after HR / IT reset it): the person chooses their own password before using the app
+function pwForm(id, btn) {
+  return `<form class="form" id="${id}"><label>New password<input name="p1" type="password" autocomplete="new-password" minlength="8" required></label>
+    <label>Type it again<input name="p2" type="password" autocomplete="new-password" minlength="8" required></label>
+    <p class="s">At least 8 characters, with letters and numbers. Do not share it; nobody from HR or IT will ask for it.</p>
+    <div class="eerr"></div><button class="btn primary block" type="submit">${btn}</button></form>`;
+}
+function wirePwForm(f, done) {
+  f.onsubmit = async (ev) => { ev.preventDefault(); const err = f.querySelector(".eerr"); err.innerHTML = ""; const b = f.querySelector("button[type=submit]");
+    if (f.p1.value !== f.p2.value) { err.innerHTML = errBox(new Error("The two passwords are not the same.")); return; }
+    if (!/[a-z]/i.test(f.p1.value) || !/[0-9]/.test(f.p1.value) || f.p1.value.length < 8) { err.innerHTML = errBox(new Error("Use at least 8 characters with letters and numbers.")); return; }
+    b.disabled = true;
+    try { await changePassword(f.p1.value); await rpc("iaf_password_changed"); if (state.me) state.me.must_change_password = false; await done(); }
+    catch (e) { err.innerHTML = errBox(e); b.disabled = false; } };
+}
+function viewSetPassword() {
+  $app.innerHTML = `<div class="auth"><div class="card"><img class="logo big" src="icons/icon-192.png" alt="IAF"><h1>Choose your password</h1>
+    <p class="sub">Hello ${esc((state.me?.full_name || "").split(" ")[0])}! You signed in with a first-time password. Choose your own password to continue.</p>
+    ${pwForm("setpw", "Save and continue")}<button class="link" data-act="signout">Sign out</button></div></div>`;
+  wirePwForm(document.getElementById("setpw"), async () => { toast("Password saved ✔"); await refreshBadge(); route(); });
 }
 // If the screen is still "loading" after 15 seconds, offer a one-tap reset of this device's saved copy and sign-in.
 function watchdog() {
