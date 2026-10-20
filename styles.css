@@ -239,3 +239,12 @@ dl.stack{display:block}dl.stack dt{font-weight:600;color:var(--ink);margin-top:8
 .rvadd{margin-top:10px}.rvadd summary{cursor:pointer;font-weight:700;padding:6px 0}
 .rv .rvd{margin:8px 0;white-space:pre-wrap}.rv textarea{width:100%}.rv .rvh{margin-top:8px}
 .detrow td{background:var(--soft,#f6f8fb)}.detbox{padding:8px 4px}.detbox .form{gap:8px}.detbox small{color:var(--mute)}
+/* update 43: menu settings per role / person */
+.navrow{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer}
+.navrow>span{flex:1;min-width:0}.navrow small{color:var(--mute);font-size:.78rem;text-align:right}
+.navrow input[type=checkbox]{width:20px;height:20px;flex:none}.navrow select{width:auto;max-width:55%;flex:none}
+.navrow.chg{background:#fff7e0}.navrow.off{cursor:default;opacity:.55}.navrow .pnote{flex-basis:100%}
+#navperson .navrow{flex-wrap:wrap}
+label.navrow{flex-direction:row;align-items:center;font-weight:400;margin:0;text-align:left}
+.navrow>span{font-weight:500}
+label.navrow{min-width:0}

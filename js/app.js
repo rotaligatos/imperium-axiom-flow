@@ -1,5 +1,5 @@
 import { buildAtrfPdf, fmtDate } from "./atrf.js";
-import { visibleGroups, renderRoles } from "./roles.js";
+import { visibleGroups, renderRoles, itemOn, OPEN_ITEMS } from "./roles.js";
 import { renderOb, renderObCheckins } from "./ob.js";
 import { renderAdmin } from "./admin.js";
 import { renderEmployees } from "./employees.js";
@@ -60,6 +60,7 @@ async function loadMe() {
   state.canCoc = await rpc("iaf_coc_can_see").catch(() => false);   // Code of Conduct guide: supervisors and up, HR, admin
   state.irWaiting = await rpc("iaf_ir_waiting_count").catch(() => 0);
   state.late = await rpc("iaf_leave_late_summary").catch(() => ({ can_see: false }));
+  state.nav = await rpc("iaf_nav_mine").catch(() => null) || { role: "staff", items: {} };
   state.irAny = true;                                   // everyone can file an incident report (General or IT form)
 }
 async function loadTypes() {
@@ -81,18 +82,20 @@ async function refreshBadge() {
 // The menu comes from js/roles.js (one definition, grouped). On a phone: Home, File leave, My requests, Approvals, More (all groups).
 function navFlags() {
   if (state.preview) return state.preview.f;
-  return { approver: state.isApprover, late: !!(state.late && state.late.can_see), coc: !!state.canCoc, people: state.canPeople, admin: state.isAdmin };
+  return { role: state.nav?.role || "staff", approver: state.isApprover, late: !!(state.late && state.late.can_see), coc: !!state.canCoc, people: state.canPeople, admin: state.isAdmin };
 }
+const navOv = () => (state.preview ? state.preview.ov || {} : state.nav?.items || {});
+const can = (key) => itemOn(key, navFlags(), navOv());
 function shell(active, title, body, wide = false) {
   const f = navFlags();
   const link = ([h, t, ic, k], cls = "") => `<a href="${h}" class="${cls}${active === k ? " on" : ""}" ${k === "approvals" ? "data-approver-nav " + (f.approver ? "" : "hidden") : ""}>
       <span class="ic" aria-hidden="true">${ic}</span><span>${t}</span>${k === "approvals" ? `<b class="badge" data-badge ${state.pending ? "" : "hidden"}>${state.pending}</b>` : ""}</a>`;
   const home = ["#/", "Home", "🏠", "home"], acct = ["#/account", "Account", "👤", "account"];
-  const groups = visibleGroups(f).map((g) => {
+  const groups = visibleGroups(f, navOv()).map((g) => {
     const on = g.items.some((it) => it[3] === active);
     return `<div class="ngroup${on ? " on" : ""}"><div class="nh">${esc(g.title)}</div>${g.items.map((it) => link(it)).join("")}</div>`;
   }).join("");
-  const tabs = [home, ["#/file", "File", "➕", "file"], ["#/requests", "Requests", "📄", "requests"], ["#/approvals", "Approvals", "✅", "approvals"]].map((it) => link(it)).join("")
+  const tabs = [home, ["#/file", "File", "➕", "file"], ["#/requests", "Requests", "📄", "requests"], ["#/approvals", "Approvals", "✅", "approvals"]].filter((it) => it[3] === "home" || it[3] === "approvals" || can(it[3])).map((it) => link(it)).join("")
     + `<a href="javascript:void 0" data-more class="${["home", "file", "requests", "approvals"].includes(active) ? "" : "on"}"><span class="ic" aria-hidden="true">☰</span><span>More</span></a>`;
   const pv = state.preview ? `<div class="alert warn previewbar">Previewing the menu as <b>${esc(state.preview.name)}</b>. Pages still open with your own access. <button class="btn" data-act="endpreview">Exit preview</button></div>` : "";
   $app.innerHTML = `<div class="layout">
@@ -145,10 +148,10 @@ async function viewHome(tok) {
         <div class="bar"><i style="width:${pct}%"></i></div><div class="bs">${num(b.used)} used of ${num(b.total_allotment)} in ${YEAR}</div>${c === "VL" ? `<div class="bs h1" id="vlh1"></div>` : ""}</div>`; }).join("");
     const recent = reqs.length ? reqs.map((r) => reqRow(r)).join("") : `<div class="empty">No requests yet.</div>`;
     el.innerHTML = `<div id="homeextra"></div><div class="bals">${cards}</div>
-      <a class="btn primary block" href="#/file">➕ File a leave</a>
+      ${can("file") ? `<a class="btn primary block" href="#/file">➕ File a leave</a>` : ""}
       ${state.pending ? `<a class="notice" href="#/approvals"><b>${state.pending}</b> request${state.pending > 1 ? "s" : ""} waiting for your decision →</a>` : ""}
       <h2>Recent requests</h2><div class="list">${recent}</div>
-      ${reqs.length ? `<a class="link" href="#/requests">See all →</a>` : ""}`;
+      ${reqs.length && can("requests") ? `<a class="link" href="#/requests">See all →</a>` : ""}`;
     // Extras never block the Home screen: a slow or failing call just leaves that card out.
     const soft = (pr, ms = 8000) => Promise.race([pr, new Promise((r) => setTimeout(() => r(null), ms))]).catch(() => null);
     soft(rpc("iaf_my_leave_summary", { p_year: YEAR })).then((sm) => { const h = sm?.vl_first_half, box = document.getElementById("vlh1");
@@ -169,7 +172,7 @@ async function viewHome(tok) {
       const rvN = (Array.isArray(rvCounts) ? rvCounts : []).reduce((a, c) => a + Number(c.open || 0), 0);
       const rvAlert = rvN ? `<a class="notice" href="#/review"><b>${rvN}</b> employee record item${rvN > 1 ? "s" : ""} waiting for HR review →</a>` : "";
       const obAlert = (Array.isArray(obToday) ? obToday : []).map((o) => `<a class="notice" href="#/ob">📍 <b>Official business today</b>: ${esc(o.destination || "")} — ${o.arrived_at ? "checked in ✔" : "check in when you arrive →"}</a>`).join("");
-      box.innerHTML = obAlert + irAlert + lateAlert + medAlert + rvAlert + holAlert + retCard + newsCard + shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + holCard + `<a class="btn block" href="#/shift">🔄 Change shift</a><a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>`;
+      box.innerHTML = obAlert + irAlert + lateAlert + medAlert + rvAlert + holAlert + retCard + newsCard + shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + holCard + (can("shift") ? `<a class="btn block" href="#/shift">🔄 Change shift</a>` : "") + (can("time") ? `<a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>` : "");
     });
   } catch (e) { el.innerHTML = errBox(e); }
 }
@@ -562,7 +565,7 @@ async function viewRolesPage(tok) {
   shell("roles", "View by role", loading(), true);
   const el = document.querySelector(".content"); if (tok !== navToken) return;
   const body = document.createElement("div"); el.querySelector(".loading")?.remove(); el.appendChild(body);
-  renderRoles(body, { esc, state, onPreview: (r) => { state.preview = r; if (location.hash === "#/" || location.hash === "") route(); else location.hash = "#/"; } });
+  renderRoles(body, { esc, state, rpc, toast, errBox, onPreview: (r) => { state.preview = r; if (location.hash === "#/" || location.hash === "") route(); else location.hash = "#/"; } });
 }
 async function viewLatePage(tok) {
   if (!state.late || !state.late.can_see) { location.replace("#/"); return; }
@@ -635,6 +638,7 @@ async function route() {
   if (!getSession()) return viewLogin();
   const tok = ++navToken; const h = location.hash.replace(/^#/, "") || "/";
   const [, p, arg] = h.split("?")[0].split("/");
+  if (OPEN_ITEMS.includes(p) && state.me && !can(p)) { location.replace("#/"); return; }
   if (p === "file") return viewFile(tok);
   if (p === "requests" || p === "approvals") return viewSplit(tok, p, arg || null);
   if (p === "request" && arg) { location.replace(`#/requests/${arg}`); return; }
