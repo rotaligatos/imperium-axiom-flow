@@ -213,6 +213,7 @@ async function viewFile(tok) {
             <label class="check"><input type="radio" name="mkind" value="miscarriage"><span>Miscarriage / pregnancy loss</span></label>
             <label id="trrow">Days given to the child's father (0–7)<input type="number" name="transfer" min="0" max="7" step="1" value="0"></label></fieldset>`
         : c === "PATERNITY" ? `<label>Date of the delivery or miscarriage<input type="date" name="delivery"></label>`
+        : c === "MAT_EXT" ? `<div class="alert" id="mextbox">Looking for your Maternity Leave…</div>`
         : c === "OB" ? `<fieldset class="fs"><legend>Official business</legend><label>Where are you going? (company / site / address)<input name="obdest" maxlength="300" placeholder="e.g. J Tower, Ortigas — client site measurement"></label>
             <div class="two"><label>Time out <span class="opt">(expected)</span><input type="time" name="obout"></label><label>Time back <span class="opt">(expected)</span><input type="time" name="obin"></label></div>
             <p class="s">On the day, open the app at the place and check in with a photo. Choose how your location is shown:</p>
@@ -227,6 +228,13 @@ async function viewFile(tok) {
         : `Your request goes to your approver automatically. You'll see its progress under “My requests”. <a href="#/policies">Leave rules &amp; memos →</a>`;
       d.querySelectorAll("input,select").forEach((x) => x.addEventListener("change", () => { if (x.name === "mkind") document.getElementById("trrow").hidden = x.value !== "birth"; check(); }));
       d.querySelectorAll("input[name=deceased],input[name=obdest]").forEach((x) => x.addEventListener("input", check));
+      if (c === "MAT_EXT") rpc("iaf_leave_mat_ext_info").then((m) => {
+        const box = document.getElementById("mextbox"); if (!box || f.type.value !== "MAT_EXT") return;
+        if (!m || !m.found) { box.className = "alert warn"; box.innerHTML = "File your Maternity Leave (childbirth) first. The extension comes right after it."; return; }
+        box.className = `alert ${m.late ? "warn" : ""}`;
+        box.innerHTML = `Your Maternity Leave: <b>${esc(fmtRange(m.start, m.end))}</b>.<br>The extension (up to 30 days, unpaid) starts <b>${esc(fmtD(m.ext_start))}</b>. File by <b>${esc(fmtD(m.file_by))}</b> (45 days before your Maternity Leave ends)${m.late ? " — this is now late, it will still be sent" : ""}.`;
+        if (!f.start.value || f.start.value !== m.ext_start) { f.start.value = m.ext_start; f.end.value = m.ext_end; sync(); check(); }
+      }).catch(() => {});
     };
     const detail = () => {
       const c = f.type.value;
@@ -348,7 +356,12 @@ async function renderDetail(el, id, tok, mode) {
         ${lastCounter.notes ? `<br><i>“${esc(lastCounter.notes)}”</i>` : ""}<br><small>If you accept, it goes through the full approval chain again.</small></div>
         <div class="btns"><button class="btn primary" data-act="accept">Accept &amp; sign</button><button class="btn" data-act="decline">Decline &amp; cancel</button></div>`;
     }
-    if (r.current_approver_id === userId() && PENDING_FOR_APPROVER.includes(r.status)) {
+    const ackOnly = r.leave_types?.code === "MAT_EXT";
+    if (r.current_approver_id === userId() && PENDING_FOR_APPROVER.includes(r.status) && ackOnly) {
+      actions += `<div class="card"><h3>Acknowledge</h3><p class="s">The Maternity Leave Extension (30 days, unpaid) is the employee's right: it cannot be refused or moved. Acknowledge it with your fingerprint, face or device PIN. ${r.status === "PENDING_HR_MANAGER" ? "" : "It then goes to HR."}${r.is_late ? " <b>Filed late</b> (less than 45 days before the Maternity Leave ends): talk with HR if this is a problem." : ""}</p>
+        <label><span>Notes <span class="opt">(optional)</span></span><textarea id="anote" rows="2" maxlength="500"></textarea></label>
+        <div class="btns"><button class="btn primary" data-act="approve">Acknowledge &amp; sign</button></div></div>`;
+    } else if (r.current_approver_id === userId() && PENDING_FOR_APPROVER.includes(r.status)) {
       actions += `<div class="card"><h3>Your decision</h3><p class="s">Approving or rejecting asks for your fingerprint, face or device PIN as your signature.</p><label><span>Notes <span class="opt">(optional)</span></span><textarea id="anote" rows="2" maxlength="500"></textarea></label>
         <div class="btns"><button class="btn primary" data-act="approve">Approve &amp; sign</button><button class="btn danger" data-act="reject">Reject &amp; sign</button>
         ${r.status !== "PENDING_HR_MANAGER" ? `<button class="btn" data-act="counter-open">Propose other dates</button>` : ""}</div>
@@ -366,7 +379,7 @@ async function renderDetail(el, id, tok, mode) {
     }
     if (priv && priv.delegate && !mine) actions = `<div class="alert">HR handed this case to <b>${esc(priv.delegate)}</b>${priv.delegate_note ? `: “${esc(priv.delegate_note)}”` : ""}</div>` + actions;
     if (mine && CANCELLABLE.includes(r.status) && r.status !== "COUNTERED") actions += `<button class="btn danger block" data-act="cancel">Cancel this request</button>`;
-    const tl = apps.map((a) => `<li><b>${esc(a.approver?.full_name || "Approver")}</b> ${a.action === "APPROVED" ? "approved" : a.action === "REJECTED" ? "rejected" : "proposed other dates"}
+    const tl = apps.map((a) => `<li><b>${esc(a.approver?.full_name || "Approver")}</b> ${a.action === "APPROVED" ? (r.leave_types?.code === "MAT_EXT" ? "acknowledged" : "approved") : a.action === "REJECTED" ? "rejected" : "proposed other dates"}
       <small>${esc(a.tier.replace("_", " ").toLowerCase())} · ${esc(new Date(a.created_at).toLocaleString())}</small>${a.notes ? `<em>“${esc(a.notes)}”</em>` : ""}</li>`).join("");
     el.innerHTML = back + `<div class="card"><div class="between"><h2 class="nm">${esc(r.leave_types?.display_name)}</h2>${chip(r.status)}</div>
       ${!mine ? `<p class="s">Requested by <b>${esc(r.requester?.full_name)}</b></p>` : ""}
@@ -406,7 +419,7 @@ function wireDetail(el, r) {
   const note = () => el.querySelector("#anote")?.value.trim() || null;
   el.onclick = (ev) => {
     const b = ev.target.closest("[data-act]"); if (!b) return; const a = b.dataset.act;
-    if (a === "approve") act(async () => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "APPROVED", p_notes: note(), p_signature_id: await sign("APPROVE", state.me?.full_name) }), (s) => `Approved & signed → ${(STATUS[s] || [s])[0]}`);
+    if (a === "approve") act(async () => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "APPROVED", p_notes: note(), p_signature_id: await sign("APPROVE", state.me?.full_name) }), (s) => `${r.leave_types?.code === "MAT_EXT" ? "Acknowledged" : "Approved"} & signed → ${(STATUS[s] || [s])[0]}`);
     if (a === "reject") { if (confirm("Reject this request?")) act(async () => rpc("iaf_leave_act", { p_request_id: r.id, p_action: "REJECTED", p_notes: note(), p_signature_id: await sign("REJECT", state.me?.full_name) }), () => "Request rejected"); }
     if (a === "counter-open") el.querySelector("#cform").hidden = false;
     if (a === "accept") act(async () => rpc("iaf_leave_respond_counter", { p_request_id: r.id, p_accept: true, p_signature_id: await sign("ACCEPT", state.me?.full_name) }), () => "Accepted & signed — sent back for approval");
@@ -680,8 +693,8 @@ async function downloadForm(r, apps, btn) {
     const pdf = buildAtrfPdf({
       companyName: emp.companies?.name || "", companyCode: emp.companies?.short_code || "", controlNo: "QC26-001", ref: "LV-" + String(r.id).slice(0, 8).toUpperCase(),
       name: emp.full_name || r.requester?.full_name || "", dateFiled: r.created_at, designation: emp.roles?.title || "", department: emp.departments?.name || "",
-      types: { vl: code === "VL", sl: code === "SL", unpaid: !!r.is_unpaid_loa_conversion || code === "UNPAID_LOA", bday: code === "BIRTHDAY", solo: code === "SOLO_PARENT",
-        bereave: code === "BEREAVEMENT", matpat: code === "MATERNITY" || code === "PATERNITY", wom: code === "RA9710", vawc: code === "RA9262", wfh: code === "WFH", ob: code === "OB" },
+      types: { vl: code === "VL", sl: code === "SL", unpaid: !!r.is_unpaid_loa_conversion || code === "UNPAID_LOA" || code === "MAT_EXT", bday: code === "BIRTHDAY", solo: code === "SOLO_PARENT",
+        bereave: code === "BEREAVEMENT", matpat: code === "MATERNITY" || code === "PATERNITY" || code === "MAT_EXT", wom: code === "RA9710", vawc: code === "RA9262", wfh: code === "WFH", ob: code === "OB" },
       destination: r.detail?.destination || "",
       purpose: r.reason || "", from: fmtDate(r.start_date), to: fmtDate(r.end_date), total: `${num(r.days_requested)} day(s)`,
       decision, rejectReason: decision === "REJECTED" ? (final?.notes || "") : "", dateActioned: decision ? (final?.created_at || null) : null,

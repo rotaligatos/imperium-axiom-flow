@@ -1,6 +1,6 @@
 // Leave credits (administrator / HR staff, desktop): give the year's VL / SL from the company leave table,
 // see everyone's balances (first-half use, SL for January cash conversion, overused credits of people who left),
-// and keep the leave table itself (tenure step-ups are extra rows with "years of service").
+// loyalty leave (extra VL HR gives an awardee for one year), and keep the leave table itself.
 const BAND = { staff: "Staff", supervisor: "Supervisor", manager: "Manager", dept_head: "Department Head" };
 const ACT = { create: "Will be created", update: "Will be updated", same: "Already correct", kept_manual: "Set by hand — kept", no_login: "No login yet", skip: "Not eligible" };
 const n = (v) => (v === null || v === undefined || v === "" ? "—" : String(Number(v)));
@@ -16,7 +16,7 @@ export async function renderCredits(el, ctx) {
   const reload = () => renderCredits(el, ctx);
   const head = `<div class="only-mobile"><p class="s">Leave credits are managed on a computer.</p></div><div class="only-desktop">
     <div class="cotabs">${companies.map((c) => `<button class="cotab${c.id === cur.id ? " on" : ""}" data-co="${esc(c.id)}">${esc(c.short_code)}</button>`).join("")}</div>
-    <div class="between"><div class="cotabs">${[["report", "Balances"], ["grant", "Give credits"], ["table", "Leave table"]].map(([k, t]) => `<button class="cotab${st.view === k ? " on" : ""}" data-view="${k}">${t}</button>`).join("")}</div>
+    <div class="between"><div class="cotabs">${[["report", "Balances"], ["grant", "Give credits"], ["loyalty", "Loyalty leave"], ["table", "Leave table"]].map(([k, t]) => `<button class="cotab${st.view === k ? " on" : ""}" data-view="${k}">${t}</button>`).join("")}</div>
       <span><button class="btn sm" data-y="-1" aria-label="Previous year">‹</button> <b>${st.year}</b> <button class="btn sm" data-y="1" aria-label="Next year">›</button></span></div>
     <div id="cbody"><div class="empty">Loading…</div></div></div>`;
   el.innerHTML = head;
@@ -27,6 +27,7 @@ export async function renderCredits(el, ctx) {
   try {
     if (st.view === "report") await report(body, cur, ctx);
     else if (st.view === "grant") await grant(body, cur, ctx, reload);
+    else if (st.view === "loyalty") await loyalty(body, cur, ctx, reload);
     else await table(body, cur, ctx, reload);
   } catch (e) { body.innerHTML = errBox(e); }
 }
@@ -88,7 +89,7 @@ async function table(body, cur, { rpc, esc, toast, errBox }, reload) {
       <div class="tscroll"><table class="dtab"><tr><th>Level</th>${codes.map(([, t]) => `<th>${t}</th>`).join("")}</tr>
       ${Object.values(BAND).map((b, i) => `<tr><td>${b}</td>${codes.map(([c]) => `<td>${grid(c)[i].map((r) => `${n(r.days)}${Number(r.min_service_years) ? ` <small>from ${n(r.min_service_years)} yrs</small>` : ""}${r.company !== "All companies" ? ` <small>(${esc(r.company)})</small>` : ""}`).join("<br>") || "—"}</td>`).join("")}</tr>`).join("")}</table></div>
       <p class="s">Head of Plant Operation and Managing Director use the Department Head row. Years of service are counted from the hire date up to January 1.</p></div>
-    <div class="card"><h3>Add or change a row</h3><p class="s">For a tenure increase, enter the years of service it starts from (for example Staff, Vacation Leave, 5 years, 12 days). Changes apply the next time credits are given.</p>
+    <div class="card"><h3>Add or change a row</h3><p class="s">Leave is given by job level (HR, Oct 2026). Extra days for loyalty awardees go under <b>Loyalty leave</b>. Years of service here is only for a rule that starts after some years. Changes apply the next time credits are given.</p>
       <form class="form" id="rform"><div class="two"><label>Leave<select name="c">${codes.map(([c, t]) => `<option value="${c}">${t}</option>`).join("")}</select></label>
         <label>Level<select name="b">${Object.entries(BAND).map(([k, t]) => `<option value="${k}">${t}</option>`).join("")}</select></label></div>
         <div class="two"><label>From years of service<input type="number" name="y" min="0" max="60" step="0.5" value="0"></label><label>Days per year<input type="number" name="d" min="0" max="366" step="0.5" required></label></div>
@@ -123,4 +124,36 @@ async function confCard(box, cur, { rpc, esc, toast, errBox }) {
       try { await rpc("iaf_leave_settings_save", { p_company: cur.id, p_receiver: f.r.value || null }); toast("Saved ✔"); confCard(box, cur, { rpc, esc, toast, errBox }); }
       catch (e) { f.querySelector(".eerr").innerHTML = errBox(e); } };
   } catch (e) { box.innerHTML = `<h3>Confidential leave (RA 9262)</h3>` + errBox(e); }
+}
+
+// Loyalty leave: extra Vacation Leave days for a loyalty awardee, usable only in the year chosen (no carry over).
+async function loyalty(body, cur, { rpc, esc, toast, errBox }, reload) {
+  const [list, dir] = await Promise.all([rpc("iaf_leave_loyalty_list", { p_company: cur.id, p_year: st.year }), rpc("iaf_employee_directory", { p_company: cur.id })]);
+  const emps = (dir || []).filter((e) => e.status === "active");
+  const yrs = (d) => (d ? Math.floor((Date.now() - new Date(d + "T00:00:00")) / (365.25 * 86400000)) : null);
+  body.innerHTML = `<div class="card"><h3>Loyalty leave ${st.year} · ${esc(cur.short_code)}</h3>
+      <p class="s">Extra Vacation Leave for loyalty awardees. The days are added to the employee's ${st.year} Vacation Leave, must be used within ${st.year} and do not carry over. Use the year arrows above to choose the year (usually the year after the award).</p>
+      <div class="tscroll"><table class="dtab"><tr><th>Employee</th><th>Hired</th><th>Award</th><th>Extra VL</th><th>Note</th><th></th></tr>
+      ${list.map((x) => `<tr><td>${esc(x.name)}${x.employee_no ? `<br><small>${esc(x.employee_no)}</small>` : ""}</td><td>${x.hire_date ? esc(x.hire_date) : "—"}</td>
+        <td>${x.milestone_years ? `${esc(String(x.milestone_years))} years` : "—"}</td><td>${n(x.days)} day(s)${x.added ? "" : '<br><small class="warnt">not added (not a regular employee or 201 incomplete)</small>'}</td>
+        <td>${esc(x.note || "")}</td><td><button class="link" data-rm="${esc(x.id)}">Remove</button></td></tr>`).join("") || `<tr><td colspan="6">No loyalty leave for ${st.year} yet.</td></tr>`}</table></div></div>
+    <div class="card"><h3>Give loyalty leave for ${st.year}</h3><form class="form" id="lform">
+      <label>Employee<input name="emp" list="lemps" required placeholder="Type a name" autocomplete="off"><datalist id="lemps">${emps.map((e) => `<option value="${esc(e.full_name)}${e.employee_no ? ` · ${esc(e.employee_no)}` : ""}"></option>`).join("")}</datalist><small id="lhint"></small></label>
+      <div class="two"><label>Extra VL days<input type="number" name="d" min="0.5" max="30" step="0.5" required></label><label>Years of service awarded <span class="opt">(optional)</span><input type="number" name="m" min="1" max="60" step="1" placeholder="e.g. 10"></label></div>
+      <label>Note <span class="opt">(optional)</span><input name="note" maxlength="300" placeholder="e.g. 10-year loyalty award, Dec 2026 program"></label>
+      <div class="eerr"></div><button class="btn primary" type="submit">Save</button></form>
+      <p class="s">If ${st.year} credits were already given, the employee's Vacation Leave is updated right away (unless it was set by hand). If not yet, the days are included when you use <b>Give credits</b>.</p></div>`;
+  const f = body.querySelector("#lform");
+  const pick = () => { const v = f.emp.value.trim(); return emps.find((e) => `${e.full_name}${e.employee_no ? ` · ${e.employee_no}` : ""}` === v) || emps.find((e) => e.full_name === v) || null; };
+  f.emp.oninput = () => { const e = pick(); const y = e && yrs(e.hire_date); body.querySelector("#lhint").textContent = e ? `${e.dept_name || ""}${e.hire_date ? ` · hired ${e.hire_date}${y !== null ? ` (${y} years)` : ""}` : " · hire date missing"}` : ""; if (e && y && !f.m.value) f.m.value = y; };
+  f.onsubmit = async (ev) => {
+    ev.preventDefault(); const err = f.querySelector(".eerr"); err.innerHTML = ""; const e = pick();
+    if (!e) { err.innerHTML = errBox(new Error("Choose the employee from the list.")); return; }
+    try {
+      const r = await rpc("iaf_leave_loyalty_save", { p_employee: e.id, p_year: st.year, p_days: Number(f.d.value), p_milestone: f.m.value ? Number(f.m.value) : null, p_note: f.note.value || null });
+      toast(r.balance === "updated" ? `Saved ✔ ${e.full_name}'s ${st.year} VL is now ${n(r.total)} days` : r.balance === "kept_manual" ? "Saved ✔ Their VL was set by hand: add the days there too." : "Saved ✔ The days are added when credits are given.");
+      reload();
+    } catch (x) { err.innerHTML = errBox(x); }
+  };
+  body.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = async () => { if (!confirm("Remove this loyalty leave?")) return; try { await rpc("iaf_leave_loyalty_remove", { p_id: b.dataset.rm }); toast("Removed ✔"); reload(); } catch (x) { toast(x.message, true); } }));
 }
