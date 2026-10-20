@@ -3,11 +3,13 @@
 // loyalty leave (extra VL HR gives an awardee for one year), and keep the leave table itself.
 const BAND = { staff: "Staff", supervisor: "Supervisor", manager: "Manager", dept_head: "Department Head" };
 const ACT = { create: "Will be created", update: "Will be updated", same: "Already correct", kept_manual: "Set by hand — kept", no_login: "No login yet", skip: "Not eligible" };
+import { historyHtml } from "./review.js";
+let ctxRef = null;
 const n = (v) => (v === null || v === undefined || v === "" ? "—" : String(Number(v)));
 let st = { co: null, year: new Date().getFullYear(), view: "report", preview: null };
 
 export async function renderCredits(el, ctx) {
-  const { rpc, esc, toast, errBox, state } = ctx;
+  const { rpc, esc, toast, errBox, state } = ctx; ctxRef = ctx; st.el = el;
   el.innerHTML = `<div class="empty">Loading…</div>`;
   let companies; try { companies = await rpc("iaf_my_companies"); } catch (e) { el.innerHTML = errBox(e); return; }
   if (!companies.length) { el.innerHTML = `<div class="empty">No companies in your access.</div>`; return; }
@@ -32,24 +34,57 @@ export async function renderCredits(el, ctx) {
   } catch (e) { body.innerHTML = errBox(e); }
 }
 
-async function report(body, cur, { rpc, esc }) {
+async function report(body, cur, { rpc, esc, toast, errBox }) {
   const r = await rpc("iaf_leave_balance_report", { p_company: cur.id, p_year: st.year });
   const rows = r.rows || [];
   const sep = rows.filter((x) => x.separation_date && (Number(x.vl_overused) > 0 || Number(x.sl_overused) > 0));
-  const noBal = rows.filter((x) => x.vl_total === null && Number(x.vl_entitled) > 0).length;
+  const noBal = rows.filter((x) => x.source !== "app" && x.has_login && Number(x.vl_entitled) > 0).length;
+  const hrRec = rows.filter((x) => x.source === "hr_record").length;
+  const src = (x) => (x.source === "app" ? '<span class="chip ok">app</span>' : x.source === "hr_record" ? '<span class="chip wait">HR record</span>' : '<span class="chip mute">none</span>');
+  const left = (t, u) => (t === null || t === undefined ? "—" : n(Math.max(0, Number(t) - Number(u || 0))));
   body.innerHTML = `<div class="card"><div class="between"><h3>Balances ${st.year} · ${esc(cur.short_code)}</h3><button class="btn sm" id="csv">Download (Excel / CSV)</button></div>
-      <p class="s">January–June: only half of the year's Vacation Leave can be used; more than that needs the approver's approval. Unused Sick Leave is converted to cash in January ${st.year + 1}. Unused Vacation Leave is forfeited at year end.</p>
-      ${noBal ? `<div class="alert warn">${noBal} eligible employee${noBal > 1 ? "s have" : " has"} no ${st.year} balance yet. Use <b>Give credits</b>.</div>` : ""}
+      <p class="s">January–June: only half of the year's Vacation Leave can be used; more than that needs the approver's approval. Unused Sick Leave is converted to cash in January ${st.year + 1}. Unused Vacation Leave is forfeited at year end.
+        Credits marked <b>HR</b> were given by HR (tenure, job offer or contract); they replace the leave table. People who resigned earn their credits for the finished months only, in whole days.</p>
+      ${r.review_open ? `<a class="notice" href="#/review"><b>${r.review_open}</b> item${r.review_open > 1 ? "s" : ""} in ${esc(cur.short_code)} waiting for HR review →</a>` : ""}
+      ${hrRec ? `<div class="alert">${hrRec} employee${hrRec > 1 ? "s are" : " is"} shown from HR's record (leave monitoring). ${noBal ? `${noBal} of them ha${noBal > 1 ? "ve" : "s"} a login: use <b>Give credits</b> so their balance shows on their phone.` : ""}</div>` : ""}
       ${sep.length ? `<div class="alert bad"><b>Overused credits to deduct from final pay:</b> ${sep.map((x) => `${esc(x.name)} (VL ${n(x.vl_overused)}, SL ${n(x.sl_overused)})`).join("; ")}</div>` : ""}
-      <div class="tscroll"><table class="dtab"><tr><th>Employee</th><th>Level</th><th>Type</th><th>VL given</th><th>VL used</th><th>VL left</th><th>Jan–Jun used / half</th><th>SL given</th><th>SL used</th><th>SL for cash</th></tr>
-      ${rows.map((x) => `<tr${x.status !== "active" ? ' class="dim"' : ""}><td>${esc(x.name)}${x.employee_no ? `<br><small>${esc(x.employee_no)}</small>` : ""}${x.has_login ? "" : '<br><small class="warnt">no login</small>'}</td><td>${esc(x.band)}</td>
-        <td>${esc(x.employment_type || "—")}</td><td>${n(x.vl_total)}${x.vl_total === null && Number(x.vl_entitled) ? `<br><small>should be ${n(x.vl_entitled)}</small>` : ""}</td><td>${n(x.vl_used)}</td><td>${n(x.vl_left)}</td>
+      <div class="tscroll"><table class="dtab"><tr><th>Employee</th><th>Level</th><th>Record</th><th>VL given</th><th>VL used</th><th>VL left</th><th>Jan–Jun used / half</th><th>SL given</th><th>SL used</th><th>SL for cash</th><th></th></tr>
+      ${rows.map((x, i) => `<tr${x.status !== "active" ? ' class="dim"' : ""}><td>${esc(x.name)}${x.employee_no ? `<br><small>${esc(x.employee_no)}</small>` : ""}${x.has_login ? "" : '<br><small class="warnt">no login</small>'}${x.separation_date ? `<br><small class="warnt">left ${esc(x.separation_date)}</small>` : ""}${Number(x.review_open) ? `<br><a class="chip warn" href="#/review">${x.review_open} for review</a>` : ""}</td>
+        <td>${esc(x.band)}<br><small>${esc(x.employment_type || "")}</small></td><td>${src(x)}</td>
+        <td>${n(x.vl_total)}${x.hr_given ? ' <small class="chip tchip">HR</small>' : ""}${Number(x.loyalty_given) ? `<br><small>incl. ${n(x.loyalty_given)} loyalty</small>` : ""}${x.separation_date ? `<br><small>earned ${n(x.vl_earned)} (${x.months_worked} mo.)</small>` : ""}</td>
+        <td>${n(x.vl_used)}${Number(x.loyalty_used) ? `<br><small>${n(x.loyalty_used)} loyalty</small>` : ""}</td><td>${x.separation_date ? `${left(x.vl_earned, x.vl_used)}${Number(x.vl_overused) ? ` <span class="chip bad">over ${n(x.vl_overused)}</span>` : ""}` : n(x.vl_left)}</td>
         <td>${x.vl_total === null ? "—" : `${n(x.vl_h1_used)} / ${n(x.vl_h1_cap)}${Number(x.vl_h1_used) > Number(x.vl_h1_cap) ? ' <span class="chip warn">over</span>' : ""}`}</td>
-        <td>${n(x.sl_total)}</td><td>${n(x.sl_used)}</td><td>${x.sl_total === null ? "—" : n(x.sl_unused_for_cash)}</td></tr>`).join("") || `<tr><td colspan="10">No employees.</td></tr>`}</table></div></div>`;
+        <td>${n(x.sl_total)}${x.separation_date ? `<br><small>earned ${n(x.sl_earned)}</small>` : ""}</td><td>${n(x.sl_used)}</td><td>${x.separation_date ? `${left(x.sl_earned, x.sl_used)}${Number(x.sl_overused) ? ` <span class="chip bad">over ${n(x.sl_overused)}</span>` : ""}` : x.sl_total === null ? "—" : n(x.sl_unused_for_cash)}</td>
+        <td><button class="btn sm" data-det="${i}">Details</button></td></tr><tr class="detrow" data-detrow="${i}" hidden><td colspan="11"></td></tr>`).join("") || `<tr><td colspan="11">No employees.</td></tr>`}</table></div></div>`;
+  body.querySelectorAll("[data-det]").forEach((b) => (b.onclick = async () => {
+    const i = Number(b.dataset.det), x = rows[i], tr = body.querySelector(`[data-detrow="${i}"]`), td = tr.firstElementChild;
+    if (!tr.hidden) { tr.hidden = true; return; }
+    tr.hidden = false; td.innerHTML = `<div class="empty small">Loading…</div>`;
+    const draw = async () => {
+      let hist = []; try { hist = await rpc("iaf_leave_history", { p_employee: x.employee_id, p_year: st.year }); } catch (e) { td.innerHTML = errBox(e); return; }
+      td.innerHTML = `<div class="detbox"><div class="two">
+          <form class="form" data-given="VL"><b>Vacation Leave ${st.year}</b><small>${esc(x.vl_basis || "")}</small>
+            <div class="two"><label>Days given<input type="number" name="d" min="0" max="60" step="0.5" value="${x.hr_given ? esc(String(Number(x.vl_total) - Number(x.loyalty_given || 0))) : ""}" placeholder="leave table: ${esc(n(x.vl_entitled))}"></label><label>Reason<input name="note" maxlength="300" placeholder="e.g. job offer, contract, tenure"></label></div>
+            <div class="btns"><button class="btn sm primary" type="submit">Save VL</button><button class="btn sm" type="button" data-clear>Use leave table</button></div></form>
+          <form class="form" data-given="SL"><b>Sick Leave ${st.year}</b><small>${esc(x.sl_basis || "")}</small>
+            <div class="two"><label>Days given<input type="number" name="d" min="0" max="60" step="0.5" value="${x.hr_given ? esc(String(Number(x.sl_total))) : ""}" placeholder="leave table: ${esc(n(x.sl_entitled))}"></label><label>Reason<input name="note" maxlength="300" placeholder="e.g. job offer, contract, tenure"></label></div>
+            <div class="btns"><button class="btn sm primary" type="submit">Save SL</button><button class="btn sm" type="button" data-clear>Use leave table</button></div></form></div>
+        <div class="eerr"></div>${historyHtml(hist, esc, st.year)}</div>`;
+      td.querySelectorAll("[data-given]").forEach((f) => {
+        const save = async (days) => { td.querySelector(".eerr").innerHTML = "";
+          try { const out = await rpc("iaf_leave_given_set", { p_employee: x.employee_id, p_year: st.year, p_code: f.dataset.given, p_days: days, p_note: f.note.value || null });
+            toast(`Saved ✔ ${f.dataset.given} ${st.year}: ${n(out.days)} days`); renderCredits(st.el, ctxRef); }
+          catch (e) { td.querySelector(".eerr").innerHTML = errBox(e); } };
+        f.onsubmit = (ev) => { ev.preventDefault(); if (f.d.value === "") { td.querySelector(".eerr").innerHTML = errBox(new Error("Type the days, or use the leave table.")); return; } save(Number(f.d.value)); };
+        f.querySelector("[data-clear]").onclick = () => { if (confirm(`Use the leave table for ${x.name}'s ${f.dataset.given} ${st.year}?`)) save(null); };
+      });
+    };
+    draw();
+  }));
   body.querySelector("#csv").onclick = () => {
     const cols = [["employee_no", "Employee no."], ["name", "Name"], ["dept", "Department"], ["band", "Level"], ["employment_type", "Employment type"], ["regularization_date", "Regularized"], ["separation_date", "Separated"],
-      ["vl_entitled", "VL entitled"], ["vl_total", "VL given"], ["vl_used", "VL used"], ["vl_left", "VL left"], ["vl_h1_used", "VL used Jan-Jun"], ["vl_h1_cap", "VL Jan-Jun half"],
-      ["sl_entitled", "SL entitled"], ["sl_total", "SL given"], ["sl_used", "SL used"], ["sl_unused_for_cash", "SL for cash conversion"], ["vl_overused", "VL overused"], ["sl_overused", "SL overused"]];
+      ["source", "Record"], ["hr_given", "Given by HR"], ["vl_entitled", "VL entitled"], ["vl_total", "VL given"], ["loyalty_given", "Loyalty days"], ["vl_used", "VL used"], ["loyalty_used", "Loyalty used"], ["vl_left", "VL left"], ["vl_h1_used", "VL used Jan-Jun"], ["vl_h1_cap", "VL Jan-Jun half"],
+      ["sl_entitled", "SL entitled"], ["sl_total", "SL given"], ["sl_used", "SL used"], ["sl_unused_for_cash", "SL for cash conversion"], ["months_worked", "Months worked (resigned)"], ["vl_earned", "VL earned"], ["sl_earned", "SL earned"], ["vl_overused", "VL overused"], ["sl_overused", "SL overused"], ["review_open", "Open review items"]];
     const q = (v) => { const s = v === null || v === undefined ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const csv = "﻿" + [cols.map((c) => q(c[1])).join(","), ...rows.map((x) => cols.map((c) => q(x[c[0]])).join(","))].join("\r\n");
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = `Leave_balances_${cur.short_code}_${st.year}.csv`;
