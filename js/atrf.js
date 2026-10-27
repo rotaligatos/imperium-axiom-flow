@@ -64,7 +64,8 @@ function copy(p, ox, oy, d) {
   t("LEAVES & TIME-OFF", 3, 89, { size: 7, bold: true });
   LEAVES.forEach(([k, label, sub], i) => { const y = 94 + i * 10.7;
     p.check(X(4), Y(y), 6.2, !!d.types?.[k]); t(label, 13, y + 5.6, { size: 7 });
-    if (sub) t(sub, 13 + p.width(label + " ", 7, false), y + 5.6, { size: 5 }); });
+    if (sub) t(sub, 13 + p.width(label + " ", 7, false), y + 5.6, { size: 5 });
+    if (k === "vl" && Number(d.loyaltyDays) > 0) t(`incl. ${d.loyaltyDays} day(s) Loyalty Leave`, 13 + p.width(label + " ", 7, false), y + 5.6, { size: 5.5, bold: true }); });
   t("OTHERS:", 201, 89, { size: 7, bold: true });
   p.check(X(203), Y(93), 6.2, !!d.types?.wfh); t("Work From Home", 212, 98.6, { size: 7 });
   p.check(X(203), Y(104), 6.2, !!d.types?.ob); t("Official Business (OB)", 212, 109.6, { size: 7 });

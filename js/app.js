@@ -8,6 +8,7 @@ import { renderSchedules, dayLine } from "./schedules.js";
 import { renderNotices, noticesHtml } from "./announcements.js";
 import { renderShift } from "./shift.js";
 import { renderTime } from "./timeadj.js";
+import { renderOt } from "./overtime.js";
 import { renderHolidays } from "./holidays.js";
 import { renderPolicies } from "./policies.js";
 import { renderCredits } from "./credits.js";
@@ -146,7 +147,7 @@ async function viewHome(tok) {
       if (!b) return `<div class="bal"><div class="bn">${name}</div><div class="bv">—</div><div class="bs">No ${YEAR} balance set up yet</div></div>`;
       const pct = Number(b.total_allotment) ? Math.max(0, Math.min(100, (Number(b.remaining) / Number(b.total_allotment)) * 100)) : 0;
       return `<div class="bal"><div class="bn">${name}</div><div class="bv">${num(b.remaining)}<small> days left</small></div>
-        <div class="bar"><i style="width:${pct}%"></i></div><div class="bs">${num(b.used)} used of ${num(b.total_allotment)} in ${YEAR}</div>${c === "VL" ? `<div class="bs h1" id="vlh1"></div>` : ""}</div>`; }).join("");
+        <div class="bar"><i style="width:${pct}%"></i></div><div class="bs">${num(b.used)} used of ${num(b.total_allotment)} in ${YEAR}</div>${c === "VL" ? `<div class="bs h1" id="vlh1"></div><div class="bs" id="vlloy"></div>` : ""}</div>`; }).join("");
     const recent = reqs.length ? reqs.map((r) => reqRow(r)).join("") : `<div class="empty">No requests yet.</div>`;
     el.innerHTML = `<div id="homeextra"></div><div class="bals">${cards}</div>
       ${can("file") ? `<a class="btn primary block" href="#/file">➕ File a leave</a>` : ""}
@@ -155,10 +156,13 @@ async function viewHome(tok) {
       ${reqs.length && can("requests") ? `<a class="link" href="#/requests">See all →</a>` : ""}`;
     // Extras never block the Home screen: a slow or failing call just leaves that card out.
     const soft = (pr, ms = 8000) => Promise.race([pr, new Promise((r) => setTimeout(() => r(null), ms))]).catch(() => null);
-    soft(rpc("iaf_my_leave_summary", { p_year: YEAR })).then((sm) => { const h = sm?.vl_first_half, box = document.getElementById("vlh1");
-      if (!h || !box || tok !== navToken || new Date().getMonth() > 5) return;
-      box.textContent = `Until June 30: ${num(h.left)} of ${num(h.cap)} days left to use (half of your VL). More needs approval.`; });
-    Promise.all([soft(rpc("iaf_my_schedule", { p_days: 7 })), soft(rpc("iaf_my_announcements")), soft(rpc("iaf_shift_change_inbox")), soft(rpc("iaf_time_adj_inbox")), soft(rpc("iaf_shift_change_news")), soft(rpc("iaf_shift_change_mine")), soft(rpc("iaf_holidays", { p_from: todayStr(), p_to: ymd(new Date(Date.now() + 30 * 86400000)) })), soft(rpc("iaf_holiday_alerts")), soft(rpc("iaf_ob_today")), state.canPeople ? soft(rpc("iaf_concern_counts")) : null]).then(([mySch, myNotices, shiftIn, timeIn, shiftNews, shiftMine, hols, halert, obToday, rvCounts]) => {
+    soft(rpc("iaf_my_leave_summary", { p_year: YEAR })).then((sm) => { if (tok !== navToken) return;
+      const ly = sm?.loyalty, lbox = document.getElementById("vlloy");
+      if (ly && ly.has_loyalty && lbox) lbox.textContent = `Includes ${num(ly.days)} loyalty day${Number(ly.days) === 1 ? "" : "s"}${ly.milestone_years ? ` (${ly.milestone_years} years)` : ""}: ${num(ly.left)} left, used first, until Dec 31 only.`;
+      const h = sm?.vl_first_half, box = document.getElementById("vlh1");
+      if (!h || !box || new Date().getMonth() > 5) return;
+      box.textContent = `Until June 30: ${num(h.left)} of ${num(h.cap)} days left to use (half of your VL${Number(h.loyalty) ? ` + ${num(h.loyalty)} loyalty` : ""}). More needs approval.`; });
+    Promise.all([soft(rpc("iaf_my_schedule", { p_days: 7 })), soft(rpc("iaf_my_announcements")), soft(rpc("iaf_shift_change_inbox")), soft(rpc("iaf_time_adj_inbox")), soft(rpc("iaf_shift_change_news")), soft(rpc("iaf_shift_change_mine")), soft(rpc("iaf_holidays", { p_from: todayStr(), p_to: ymd(new Date(Date.now() + 30 * 86400000)) })), soft(rpc("iaf_holiday_alerts")), soft(rpc("iaf_ob_today")), state.canPeople ? soft(rpc("iaf_concern_counts")) : null, can("ot") ? soft(rpc("iaf_ot_waiting_count")) : null]).then(([mySch, myNotices, shiftIn, timeIn, shiftNews, shiftMine, hols, halert, obToday, rvCounts, otN]) => {
       const box = document.getElementById("homeextra"); if (!box || tok !== navToken) return;
       const schedCard = mySch && mySch.linked && mySch.days.length ? `<div class="card mysched"><h3>My schedule</h3>${mySch.days.map((d, i) => `<div class="row${i === 0 ? " today" : ""}${d.rest ? " rest" : ""}"><span>${i === 0 ? "Today" : new Date(d.date + "T00:00:00").toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" })}</span><span>${esc(dayLine(d))}</span></div>`).join("")}${mySch.days[0].schedule ? `<p class="s">${esc(mySch.days[0].schedule)}</p>` : ""}</div>` : "";
       const shiftCard = Array.isArray(shiftIn) && shiftIn.length ? `<a class="notice" href="#/shift"><b>${shiftIn.length}</b> shift change request${shiftIn.length > 1 ? "s" : ""} waiting for your decision →</a>` : "";
@@ -173,7 +177,8 @@ async function viewHome(tok) {
       const rvN = (Array.isArray(rvCounts) ? rvCounts : []).reduce((a, c) => a + Number(c.open || 0), 0);
       const rvAlert = rvN ? `<a class="notice" href="#/review"><b>${rvN}</b> employee record item${rvN > 1 ? "s" : ""} waiting for HR review →</a>` : "";
       const obAlert = (Array.isArray(obToday) ? obToday : []).map((o) => `<a class="notice" href="#/ob">📍 <b>Official business today</b>: ${esc(o.destination || "")} — ${o.arrived_at ? "checked in ✔" : "check in when you arrive →"}</a>`).join("");
-      box.innerHTML = obAlert + irAlert + lateAlert + medAlert + rvAlert + holAlert + retCard + newsCard + shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + holCard + (can("shift") ? `<a class="btn block" href="#/shift">🔄 Change shift</a>` : "") + (can("time") ? `<a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>` : "");
+      const otCard = Number(otN) > 0 ? `<a class="notice" href="#/ot"><b>${Number(otN)}</b> overtime item${Number(otN) > 1 ? "s" : ""} waiting for you →</a>` : "";
+      box.innerHTML = obAlert + otCard + irAlert + lateAlert + medAlert + rvAlert + holAlert + retCard + newsCard + shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + holCard + (can("shift") ? `<a class="btn block" href="#/shift">🔄 Change shift</a>` : "") + (can("time") ? `<a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>` : "") + (can("ot") ? `<a class="btn block" href="#/ot">🕐 Overtime</a>` : "");
     });
   } catch (e) { el.innerHTML = errBox(e); }
 }
@@ -352,6 +357,8 @@ async function renderDetail(el, id, tok, mode) {
     const mine = r.requester_id === userId();
     let priv = null; if (r.leave_types?.code === "CONFIDENTIAL") { try { priv = await rpc("iaf_leave_private_get", { p_request: r.id }); } catch {} }
     const dt = priv?.detail || r.detail || {};
+    const loyDays = r.leave_types?.code === "VL" ? Number(await rpc("iaf_leave_loyalty_part", { p_request: r.id }).catch(() => 0)) || 0 : 0;
+    if (tok !== navToken) return;
     const detailRows = [
       dt.relationship ? `<dt>Deceased</dt><dd>${esc(dt.deceased_name || "")} (${esc(REL[dt.relationship] || dt.relationship)})</dd>` : "",
       dt.kind ? `<dt>Maternity</dt><dd>${dt.kind === "miscarriage" ? "Miscarriage" : "Childbirth"}${Number(dt.transfer_days) ? ` · ${num(dt.transfer_days)} day(s) given to the father` : ""}</dd>` : "",
@@ -395,6 +402,7 @@ async function renderDetail(el, id, tok, mode) {
       <dl><dt>Dates</dt><dd>${esc(fmtRange(r.start_date, r.end_date))}</dd><dt>Days</dt><dd>${num(r.days_requested)}</dd>
       ${priv ? `<dt>Type</dt><dd>🔒 ${esc(priv.type_name || priv.type_code)} <small>(only you and HR see this)</small></dd>` : ""}
       ${(priv?.reason || r.reason) ? `<dt>Reason</dt><dd>${esc(priv?.reason || r.reason)}</dd>` : ""}${detailRows}
+      ${loyDays ? `<dt>Loyalty leave</dt><dd>${num(loyDays)} day${loyDays === 1 ? "" : "s"} of this request <small>(used first, outside the Jan–Jun half)</small></dd>` : ""}
       ${r.is_vl_covering_sl ? `<dt>Note</dt><dd>VL covering exhausted SL (HR Manager approval required)</dd>` : ""}
       ${r.is_unpaid_loa_conversion ? `<dt>Note</dt><dd>Balance ran out — converted to unpaid leave</dd>` : ""}
       ${r.med_cert_status ? `<dt>Medical certificate</dt><dd class="${r.med_cert_status === "missing" ? "warnt" : ""}">${esc(MEDC[r.med_cert_status] || r.med_cert_status)}${r.med_cert_status === "missing" ? (mine ? ". Sick Leave of more than 2 days needs a medical certificate: please give it to HR." : ". Your manager and HR are alerted until it is received.") : r.med_cert_at ? ` <small>${esc(new Date(r.med_cert_at).toLocaleDateString())}</small>` : ""}
@@ -521,6 +529,11 @@ async function viewTimePage(tok) {
   shell("time", "Half-day / Undertime", loading());
   const el = document.querySelector(".content"); if (tok !== navToken) return;
   await renderTime(el, { rpc, esc, toast, errBox });
+}
+async function viewOtPage(tok) {
+  shell("ot", "Overtime", loading(), true);
+  const el = document.querySelector(".content"); if (tok !== navToken) return;
+  await renderOt(el, { rpc, esc, toast, errBox, state });
 }
 async function viewAccount(tok) {
   shell("account", "Account", loading());
@@ -660,6 +673,7 @@ async function route() {
   if (p === "notices") return viewNoticesPage(tok);
   if (p === "shift") return viewShiftPage(tok);
   if (p === "time") return viewTimePage(tok);
+  if (p === "ot") return viewOtPage(tok);
   if (p === "holidays") return viewHolidaysPage(tok);
   if (p === "account") return viewAccount(tok);
   if (p === "policies") return viewPoliciesPage(tok);
@@ -740,6 +754,7 @@ async function downloadForm(r, apps, btn) {
   const label = btn.textContent; btn.disabled = true; btn.textContent = "Preparing PDF…";
   try {
     const safe = async (p) => { try { return await rest(p); } catch { return []; } };
+    const loyDays = r.leave_types?.code === "VL" ? Number(await rpc("iaf_leave_loyalty_part", { p_request: r.id }).catch(() => 0)) || 0 : 0;
     const [u, bal, sigs] = await Promise.all([
       safe(`users?id=eq.${encodeURIComponent(r.requester_id)}&select=full_name,roles(title),departments(name),companies(name,short_code)`),
       safe(`vw_leave_balances_live?user_id=eq.${encodeURIComponent(r.requester_id)}&year=eq.${YEAR}&select=leave_type_code,remaining`),
@@ -759,7 +774,7 @@ async function downloadForm(r, apps, btn) {
       name: emp.full_name || r.requester?.full_name || "", dateFiled: r.created_at, designation: emp.roles?.title || "", department: emp.departments?.name || "",
       types: { vl: code === "VL", sl: code === "SL", unpaid: !!r.is_unpaid_loa_conversion || code === "UNPAID_LOA" || code === "MAT_EXT", bday: code === "BIRTHDAY", solo: code === "SOLO_PARENT",
         bereave: code === "BEREAVEMENT", matpat: code === "MATERNITY" || code === "PATERNITY" || code === "MAT_EXT", wom: code === "RA9710", vawc: code === "RA9262", wfh: code === "WFH", ob: code === "OB" },
-      destination: r.detail?.destination || "",
+      destination: r.detail?.destination || "", loyaltyDays: loyDays,
       purpose: r.reason || "", from: fmtDate(r.start_date), to: fmtDate(r.end_date), total: `${num(r.days_requested)} day(s)`,
       decision, rejectReason: decision === "REJECTED" ? (final?.notes || "") : "", dateActioned: decision ? (final?.created_at || null) : null,
       approverSig: lastSig(["APPROVE", "REJECT"]), employeeSig: lastSig(["ACCEPT", "SUBMIT"]), hrSig: null, balVL: left("VL"), balSL: left("SL") });
