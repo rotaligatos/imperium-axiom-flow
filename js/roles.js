@@ -4,7 +4,7 @@
 // and can show "open" items (access true for everyone) to a role or person that does not have them by default.
 export const NAV_GROUPS = [
   { title: "My requests", items: [["#/file", "File leave", "➕", "file", () => true], ["#/requests", "My requests", "📄", "requests", () => true],
-    ["#/ob", "Official business", "📍", "ob", () => true], ["#/shift", "Change shift", "🔄", "shift", () => true], ["#/time", "Half-day / Undertime", "⏱️", "time", () => true]] },
+    ["#/ob", "Official business", "📍", "ob", () => true], ["#/shift", "Change shift", "🔄", "shift", () => true], ["#/time", "Half-day / Undertime", "⏱️", "time", () => true], ["#/ot", "Overtime", "🕐", "ot", () => true]] },
   { title: "Approvals", items: [["#/approvals", "Leave & OB approvals", "✅", "approvals", (f) => f.approver], ["#/late", "Late leave filings", "⏰", "late", (f) => f.late]] },
   { title: "Workplace", items: [["#/calendar", "Who's out", "📅", "calendar", () => true], ["#/ir", "Incident reports", "📝", "ir", () => true],
     ["#/coc", "Code of Conduct", "⚖️", "coc", (f) => f.coc], ["#/policies", "Policies & Memos", "📚", "policies", () => true]] },
@@ -14,7 +14,7 @@ export const NAV_GROUPS = [
   { title: "Admin", items: [["#/admin", "People & access", "⚙️", "admin", (f) => f.admin], ["#/logins", "Logins", "🔑", "logins", (f) => f.admin], ["#/roles", "View by role", "🔍", "roles", (f) => f.admin]] },
 ];
 // items open to everyone (the administrator may give them to anyone); the others need access given elsewhere
-export const OPEN_ITEMS = ["file", "requests", "ob", "shift", "time", "calendar", "ir", "policies"];
+export const OPEN_ITEMS = ["file", "requests", "ob", "shift", "time", "ot", "calendar", "ir", "policies"];
 const NEEDS = { approvals: "people who approve leave (org chart)", late: "supervisors, managers and HR", coc: "supervisors and up, HR",
   employees: "HR staff access (People & access)", org: "HR staff access (People & access)", schedules: "HR staff access (People & access)", credits: "HR staff access (People & access)",
   review: "HR staff access (People & access)", holidays: "HR staff access (People & access)", notices: "HR staff access (People & access)", admin: "administrators", logins: "administrators", roles: "administrators" };
@@ -47,6 +47,9 @@ ROLES.forEach((r) => (r.f.role = r.k));
 export const FEATURES = [
   ["Leave, OB, change shift, half-day / undertime", { ...ALL("Own requests"), supervisor: "Own + shift / half-day for their team", manager: "Own + shift / half-day for their team or department", head: "Own + for their area",
     hr: "Own + anyone (recorded at once)", hrm: "Own + anyone (recorded at once)", admin: "Own + anyone (recorded at once)" }],
+  ["Overtime", { ...ALL("File own; enter actual hours"), supervisor: "Own + their team (org chart); approve and confirm hours for people under them", manager: "Own + their team; approve and confirm hours",
+    head: "Approves rest day / holiday / emergency / over 12 h for their area", hr: "Biometric check before payroll; records the MD's signed soft copy; export", hrm: "Same as HR staff; approves as department head for HR",
+    admin: "Same as HR (companies in scope)" }],
   ["Approve leave and OB", { ...ALL("—"), supervisor: "Their team (first step)", manager: "Their department", head: "If on the route; final approver of shift changes",
     hr: "Cases handed to them (confidential leave)", hrm: "VL covering SL, confidential leave", admin: "If on the route" }],
   ["For HR review (employee record items)", { ...ALL("—"), hr: "Whole company: resolve, dismiss, add", hrm: "Whole company: resolve, dismiss, add", admin: "Whole company: resolve, dismiss, add" }],
