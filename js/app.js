@@ -162,7 +162,7 @@ async function viewHome(tok) {
       const h = sm?.vl_first_half, box = document.getElementById("vlh1");
       if (!h || !box || new Date().getMonth() > 5) return;
       box.textContent = `Until June 30: ${num(h.left)} of ${num(h.cap)} days left to use (half of your VL${Number(h.loyalty) ? ` + ${num(h.loyalty)} loyalty` : ""}). More needs approval.`; });
-    Promise.all([soft(rpc("iaf_my_schedule", { p_days: 7 })), soft(rpc("iaf_my_announcements")), soft(rpc("iaf_shift_change_inbox")), soft(rpc("iaf_time_adj_inbox")), soft(rpc("iaf_shift_change_news")), soft(rpc("iaf_shift_change_mine")), soft(rpc("iaf_holidays", { p_from: todayStr(), p_to: ymd(new Date(Date.now() + 30 * 86400000)) })), soft(rpc("iaf_holiday_alerts")), soft(rpc("iaf_ob_today")), state.canPeople ? soft(rpc("iaf_concern_counts")) : null, can("ot") ? soft(rpc("iaf_ot_waiting_count")) : null]).then(([mySch, myNotices, shiftIn, timeIn, shiftNews, shiftMine, hols, halert, obToday, rvCounts, otN]) => {
+    Promise.all([soft(rpc("iaf_my_schedule", { p_days: 7 })), soft(rpc("iaf_my_announcements")), soft(rpc("iaf_shift_change_inbox")), soft(rpc("iaf_time_adj_inbox")), soft(rpc("iaf_shift_change_news")), soft(rpc("iaf_shift_change_mine")), soft(rpc("iaf_holidays", { p_from: todayStr(), p_to: ymd(new Date(Date.now() + 30 * 86400000)) })), soft(rpc("iaf_holiday_alerts")), soft(rpc("iaf_ob_today")), state.canPeople ? soft(rpc("iaf_concern_counts")) : null, can("ot") ? soft(rpc("iaf_ot_waiting_count")) : null, soft(rpc("iaf_obt_waiting_count"))]).then(([mySch, myNotices, shiftIn, timeIn, shiftNews, shiftMine, hols, halert, obToday, rvCounts, otN, obtN]) => {
       const box = document.getElementById("homeextra"); if (!box || tok !== navToken) return;
       const schedCard = mySch && mySch.linked && mySch.days.length ? `<div class="card mysched"><h3>My schedule</h3>${mySch.days.map((d, i) => `<div class="row${i === 0 ? " today" : ""}${d.rest ? " rest" : ""}"><span>${i === 0 ? "Today" : new Date(d.date + "T00:00:00").toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" })}</span><span>${esc(dayLine(d))}</span></div>`).join("")}${mySch.days[0].schedule ? `<p class="s">${esc(mySch.days[0].schedule)}</p>` : ""}</div>` : "";
       const shiftCard = Array.isArray(shiftIn) && shiftIn.length ? `<a class="notice" href="#/shift"><b>${shiftIn.length}</b> shift change request${shiftIn.length > 1 ? "s" : ""} waiting for your decision →</a>` : "";
@@ -176,9 +176,10 @@ async function viewHome(tok) {
       const medAlert = state.late && state.late.can_see && state.late.med_missing > 0 ? `<a class="notice" href="#/late"><b>${state.late.med_missing}</b> sick leave${state.late.med_missing > 1 ? "s" : ""} of more than 2 days still without a medical certificate →</a>` : "";
       const rvN = (Array.isArray(rvCounts) ? rvCounts : []).reduce((a, c) => a + Number(c.open || 0), 0);
       const rvAlert = rvN ? `<a class="notice" href="#/review"><b>${rvN}</b> employee record item${rvN > 1 ? "s" : ""} waiting for HR review →</a>` : "";
-      const obAlert = (Array.isArray(obToday) ? obToday : []).map((o) => `<a class="notice" href="#/ob">📍 <b>Official business today</b>: ${esc(o.destination || "")} — ${o.arrived_at ? "checked in ✔" : "check in when you arrive →"}</a>`).join("");
+      const obAlert = (Array.isArray(obToday) ? obToday : []).map((o) => `<a class="notice" href="#/ob">📍 <b>${o.team ? "Team official business" : "Official business"} today</b>: ${esc(o.destination || "")} — ${o.arrived_at ? "checked in ✔" : "check in when you arrive →"}</a>`).join("");
       const otCard = Number(otN) > 0 ? `<a class="notice" href="#/ot"><b>${Number(otN)}</b> overtime item${Number(otN) > 1 ? "s" : ""} waiting for you →</a>` : "";
-      box.innerHTML = obAlert + otCard + irAlert + lateAlert + medAlert + rvAlert + holAlert + retCard + newsCard + shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + holCard + (can("shift") ? `<a class="btn block" href="#/shift">🔄 Change shift</a>` : "") + (can("time") ? `<a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>` : "") + (can("ot") ? `<a class="btn block" href="#/ot">🕐 Overtime</a>` : "");
+      const obtCard = Number(obtN) > 0 ? `<a class="notice" href="#/ob"><b>${Number(obtN)}</b> team official business waiting for your approval →</a>` : "";
+      box.innerHTML = obAlert + obtCard + otCard + irAlert + lateAlert + medAlert + rvAlert + holAlert + retCard + newsCard + shiftCard + timeCard + noticesHtml(Array.isArray(myNotices) ? myNotices : [], esc) + schedCard + holCard + (can("shift") ? `<a class="btn block" href="#/shift">🔄 Change shift</a>` : "") + (can("time") ? `<a class="btn block" href="#/time">⏱️ Half-day / Undertime</a>` : "") + (can("ot") ? `<a class="btn block" href="#/ot">🕐 Overtime</a>` : "");
     });
   } catch (e) { el.innerHTML = errBox(e); }
 }
@@ -474,8 +475,9 @@ async function viewCalendar(tok) {
   const now = new Date(); calMonth ||= new Date(now.getFullYear(), now.getMonth(), 1);
   try {
     const first = calMonth, last = new Date(first.getFullYear(), first.getMonth() + 1, 0);
-    const [rows, hols0] = await Promise.all([rest(`vw_leave_calendar?start_date=lte.${ymd(last)}&end_date=gte.${ymd(first)}&select=full_name,leave_type_code,start_date,end_date,is_wfh&order=start_date`),
-      rpc("iaf_holidays", { p_from: ymd(first), p_to: ymd(last) }).catch(() => [])]);
+    const [rows0, hols0, teamOb] = await Promise.all([rest(`vw_leave_calendar?start_date=lte.${ymd(last)}&end_date=gte.${ymd(first)}&select=full_name,leave_type_code,start_date,end_date,is_wfh&order=start_date`),
+      rpc("iaf_holidays", { p_from: ymd(first), p_to: ymd(last) }).catch(() => []), rpc("iaf_obt_calendar", { p_from: ymd(first), p_to: ymd(last) }).catch(() => [])]);
+    const rows = rows0.concat(Array.isArray(teamOb) ? teamOb : []);
     if (tok !== navToken) return;
     const holBy = {}; (Array.isArray(hols0) ? hols0 : []).forEach((h) => (holBy[h.date] ||= []).push(h));
     const byDay = {};

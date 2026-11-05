@@ -45,7 +45,7 @@ export const ROLES = [
 const ALL = (v) => Object.fromEntries(ROLES.map((r) => [r.k, v]));
 ROLES.forEach((r) => (r.f.role = r.k));
 export const FEATURES = [
-  ["Leave, OB, change shift, half-day / undertime", { ...ALL("Own requests"), supervisor: "Own + shift / half-day for their team", manager: "Own + shift / half-day for their team or department", head: "Own + for their area",
+  ["Leave, OB, change shift, half-day / undertime", { ...ALL("Own requests"), supervisor: "Own + shift / half-day / team OB for their team", manager: "Own + shift / half-day / team OB for their team or department; approves supervisors' team OB", head: "Own + for their area",
     hr: "Own + anyone (recorded at once)", hrm: "Own + anyone (recorded at once)", admin: "Own + anyone (recorded at once)" }],
   ["Overtime", { ...ALL("File own; enter actual hours"), supervisor: "Own + their team (org chart); approve and confirm hours for people under them", manager: "Own + their team; approve and confirm hours",
     head: "Approves rest day / holiday / emergency / over 12 h for their area", hr: "Biometric check before payroll; records the MD's signed soft copy; export", hrm: "Same as HR staff; approves as department head for HR",
